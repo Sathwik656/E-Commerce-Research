@@ -1,0 +1,40 @@
+{
+  "model": "RandomForestRegressor",
+  "n_estimators": 200,
+  "random_state": 42,
+  "test_size": 0.2,
+  "split": "customer-level (no overlap)",
+  "features": [
+    "Recency",
+    "PreviousOrderCount",
+    "HistoricalSpending",
+    "TotalItems",
+    "TotalProducts",
+    "TotalSellers",
+    "AverageOrderValue",
+    "AverageFreightValue",
+    "AverageInstallments"
+  ],
+  "target": "NextOrderSpending",
+  "target_units": "BRL (Brazilian Real)",
+  "metrics": {
+    "MAE": 95.208342,
+    "RMSE": 168.48598,
+    "R2": 0.060799,
+    "Median_AE": 56.6951
+  },
+  "split_info": {
+    "train_observations": 2499,
+    "test_observations": 621,
+    "train_customers": 2240,
+    "test_customers": 561,
+    "customer_overlap": 0
+  },
+  "verification": {
+    "model_path": "models/spending_model.pkl",
+    "features_path": "models/spending_features.json",
+    "predictions_identical": true,
+    "model_type": "RandomForestRegressor",
+    "n_features": 9
+  }
+}

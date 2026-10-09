@@ -1,0 +1,13 @@
+{
+  "features": [
+    "Recency",
+    "PreviousOrderCount",
+    "HistoricalSpending",
+    "TotalItems",
+    "TotalProducts",
+    "TotalSellers",
+    "AverageOrderValue",
+    "AverageFreightValue",
+    "AverageInstallments"
+  ]
+}

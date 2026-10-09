@@ -1,0 +1,7 @@
+customer_id,Recency,Frequency,Monetary,TotalQuantity,AverageOrderValue,AverageQuantityPerOrder,UniqueProducts,ActiveDays,Tenure,FirstPurchaseDaysAgo,OrderValueStd,OrderValueMax,OrderValueMin,OrderValueMedian,OrdersPerActiveDay,ProductsPerOrder,SpendPerDay,CountryCount,Cancellations,CancelledValue,ReturnRatio,SpendTrend
+C002,39,5,2790.86,1590,558.172,318.0,82,5,237,276,130.4953,711.79,382.52,584.91,1.0,16.4,11.7263,1,0.0,0.0,0.0,0.1492
+C003,158,3,1487.24,2124,495.7467,708.0,22,3,109,267,350.8672,892.8,227.44,367.0,1.0,7.3333,13.5204,1,0.0,0.0,0.0,-0.5061
+C004,219,1,334.4,197,334.4,197.0,17,1,0,219,0.0,334.4,334.4,334.4,1.0,17.0,334.4,1,0.0,0.0,0.0,-0.997
+C005,171,5,1561.81,254,312.362,50.8,26,4,34,206,302.9803,840.3,120.33,160.33,1.25,5.2,44.6231,1,10.0,960.63,0.6667,-0.6402
+C006,113,1,89.0,20,89.0,20.0,4,1,0,113,0.0,89.0,89.0,89.0,1.0,4.0,89.0,1,0.0,0.0,0.0,-0.9889
+C007,60,4,980.2,210,245.05,52.5,55,5,120,180,95.4,420.0,110.0,230.0,0.8,13.75,8.1667,1,1.0,60.0,0.2,0.05

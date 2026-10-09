@@ -1,0 +1,26 @@
+{
+  "features": [
+    "Recency",
+    "Frequency",
+    "Monetary",
+    "TotalQuantity",
+    "AverageOrderValue",
+    "AverageQuantityPerOrder",
+    "UniqueProducts",
+    "ActiveDays",
+    "Tenure",
+    "FirstPurchaseDaysAgo",
+    "OrderValueStd",
+    "OrderValueMax",
+    "OrderValueMin",
+    "OrderValueMedian",
+    "OrdersPerActiveDay",
+    "ProductsPerOrder",
+    "SpendPerDay",
+    "CountryCount",
+    "Cancellations",
+    "CancelledValue",
+    "ReturnRatio",
+    "SpendTrend"
+  ]
+}

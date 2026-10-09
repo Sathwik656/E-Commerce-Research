@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Risk Value - Churn &amp; Spending</title>
+  <style>
+    :root { --line:#d5d9e0; --accent:#2f5d8a; --bg:#f4f6f9; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: var(--bg); color:#1c2430; }
+    header { background: var(--accent); color:#fff; padding: 18px 24px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 4px 0 0; font-size: 13px; opacity: .9; }
+    main { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:20px; }
+    h2 { margin-top:0; font-size: 17px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+    .upload { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+    @media (max-width:800px){ .upload{ grid-template-columns:1fr; } }
+    label { display:block; font-size:13px; margin:6px 0 4px; font-weight:600; }
+    input[type=file] { width:100%; padding:8px; border:1px dashed var(--line); border-radius:6px; background:#fafbfc; }
+    button { margin-top:16px; background:var(--accent); color:#fff; border:0; border-radius:5px;
+             padding:10px 18px; font-size:14px; cursor:pointer; }
+    button:hover { background:#24486b; }
+    .hint { font-size:12px; color:#5a6675; margin:6px 0 0; line-height:1.5; }
+    .error { margin-top:12px; padding:12px; border-radius:6px; background:#fdecec; border:1px solid #f3c2c2; color:#8a2020; font-size:14px; }
+    .summary { display:flex; gap:18px; flex-wrap:wrap; margin:8px 0 14px; }
+    .stat { background:#eef4fb; border:1px solid #cfe0f2; border-radius:6px; padding:10px 14px; font-size:13px; }
+    .stat strong { display:block; font-size:18px; color:var(--accent); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { border-bottom:1px solid var(--line); padding:7px 8px; text-align:right; }
+    th:first-child, td:first-child { text-align:left; }
+    thead th { background:#f0f3f7; }
+    tbody tr:hover { background:#f8fafc; }
+    .disclaimer { font-size:12.5px; color:#5a6675; background:#fff8e6;
+                  border:1px solid #f0e0b0; border-radius:8px; padding:14px; line-height:1.6; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Customer Risk Value &mdash; Churn &amp; Spend</h1>
+  <p>Upload a churn-feature CSV and a spending-feature CSV. Both models run, then the risk value is computed.</p>
+</header>
+
+<main>
+  <div class="card">
+    <h2>1. Upload input files</h2>
+    <form method="post" action="/predict" enctype="multipart/form-data">
+      <div class="upload">
+        <div>
+          <label for="churn_file">Churn feature CSV</label>
+          <input id="churn_file" name="churn_file" type="file" accept=".csv" required>
+          <p class="hint">Required columns:<br>
+            {{ churn_features | join(', ') }}.<br>
+            Optional: <code>customer_id</code>.</p>
+        </div>
+        <div>
+          <label for="spending_file">Spending feature CSV</label>
+          <input id="spending_file" name="spending_file" type="file" accept=".csv" required>
+          <p class="hint">Required columns:<br>
+            {{ spending_features | join(', ') }}.<br>
+            Optional: <code>customer_id</code>.</p>
+        </div>
+      </div>
+      <button type="submit">Predict and calculate risk value</button>
+    </form>
+    {% if churn_error %}<div class="error"><strong>Churn file:</strong> {{ churn_error }}</div>{% endif %}
+    {% if spending_error %}<div class="error"><strong>Spending file:</strong> {{ spending_error }}</div>{% endif %}
+  </div>
+
+  {% if results %}
+  <div class="card">
+    <h2>2. Results</h2>
+    <div class="summary">
+      <div class="stat">Rows<strong>{{ result_count }}</strong></div>
+      <div class="stat">Mean risk value<strong>R$ {{ mean_risk }}</strong></div>
+      <div class="stat">Total risk value<strong>R$ {{ total_risk }}</strong></div>
+    </div>
+    <p class="hint">{{ pairing_note }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Churn probability</th>
+          <th>Predicted churn</th>
+          <th>Predicted next-order spending (BRL)</th>
+          <th>Customer risk value (BRL)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td>{{ r.customer_id }}</td>
+          <td>{{ r.churn_probability }}</td>
+          <td>{{ r.predicted_churn }}</td>
+          <td>{{ r.predicted_next_order_spending_BRL }}</td>
+          <td>{{ r.customer_risk_value_BRL }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card disclaimer">
+    <strong>Disclaimer.</strong> The churn model (Online Retail II) and the spending
+    model (Olist) were trained on two different customer populations with no shared
+    customer identifiers. The <em>Customer Risk Value</em>
+    (&ldquo;Churn Probability &times; Predicted Next-Order Spending&rdquo;) is a
+    <strong>prototype, risk-weighted spending indicator</strong> &mdash; not a validated
+    estimate of recoverable revenue, profit, or the causal financial impact of churn. Rows
+    are matched by <code>customer_id</code> when present in both files, otherwise by row
+    order. Provide your own data or the included <code>sample_inputs/</code> files for
+    demonstration.
+  </div>
+</main>
+</body>
+</html>
