@@ -5,40 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Customer Risk Value - Churn &amp; Spending</title>
   <style>
-    :root { --line:#d5d9e0; --accent:#2f5d8a; --bg:#f4f6f9; }
+    :root {
+      --line:#d5d9e0; --accent:#2f5d8a; --accent-dark:#24486b; --bg:#eef1f6;
+      --ink:#1c2430; --muted:#5a6675;
+      --low:#1f7a4d; --low-bg:#e6f4ec; --low-line:#b6e0c8;
+      --med:#9a6b00; --med-bg:#fff5df; --med-line:#f0dca6;
+      --high:#a32626; --high-bg:#fdeaea; --high-line:#f3c2c2;
+    }
     * { box-sizing: border-box; }
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: var(--bg); color:#1c2430; }
-    header { background: var(--accent); color:#fff; padding: 18px 24px; }
-    header h1 { margin: 0; font-size: 20px; }
-    header p { margin: 4px 0 0; font-size: 13px; opacity: .9; }
-    main { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:20px; }
-    h2 { margin-top:0; font-size: 17px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+    header { background: linear-gradient(120deg, #2f5d8a, #3f7bb0); color:#fff; padding: 22px 24px; }
+    header h1 { margin: 0; font-size: 21px; letter-spacing:.2px; }
+    header p { margin: 5px 0 0; font-size: 13px; opacity: .92; }
+    main { max-width: 1120px; margin: 24px auto; padding: 0 16px 40px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:20px;
+            box-shadow: 0 1px 2px rgba(20,40,70,.04); }
+    h2 { margin:0 0 14px; font-size: 16px; border-bottom:1px solid var(--line); padding-bottom:10px; }
+    h3 { font-size: 13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 8px; }
     .upload { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
     @media (max-width:800px){ .upload{ grid-template-columns:1fr; } }
     label { display:block; font-size:13px; margin:6px 0 4px; font-weight:600; }
-    input[type=file] { width:100%; padding:8px; border:1px dashed var(--line); border-radius:6px; background:#fafbfc; }
-    button { margin-top:16px; background:var(--accent); color:#fff; border:0; border-radius:5px;
-             padding:10px 18px; font-size:14px; cursor:pointer; }
-    button:hover { background:#24486b; }
-    .hint { font-size:12px; color:#5a6675; margin:6px 0 0; line-height:1.5; }
-    .error { margin-top:12px; padding:12px; border-radius:6px; background:#fdecec; border:1px solid #f3c2c2; color:#8a2020; font-size:14px; }
-    .summary { display:flex; gap:18px; flex-wrap:wrap; margin:8px 0 14px; }
-    .stat { background:#eef4fb; border:1px solid #cfe0f2; border-radius:6px; padding:10px 14px; font-size:13px; }
-    .stat strong { display:block; font-size:18px; color:var(--accent); }
+    input[type=file] { width:100%; padding:9px; border:1px dashed var(--line); border-radius:7px; background:#fafbfc; }
+    button { margin-top:16px; background:var(--accent); color:#fff; border:0; border-radius:6px;
+             padding:11px 20px; font-size:14px; font-weight:600; cursor:pointer; }
+    button:hover { background:var(--accent-dark); }
+    .hint { font-size:12px; color:var(--muted); margin:8px 0 0; line-height:1.5; }
+    .error { margin-top:12px; padding:12px; border-radius:7px; background:var(--high-bg);
+             border:1px solid var(--high-line); color:#8a2020; font-size:14px; }
+    .proto { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+             color:#8a5a00; background:#fff3d6; border:1px solid #f0dca6; border-radius:999px; padding:4px 12px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+    .stat { background:#f6f9fc; border:1px solid #dbe6f1; border-radius:9px; padding:12px 14px; }
+    .stat span { display:block; font-size:12px; color:var(--muted); }
+    .stat strong { display:block; font-size:20px; color:var(--accent); margin-top:4px; }
+    .seg-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:6px; }
+    .seg { border-radius:9px; padding:14px 16px; border:1px solid; }
+    .seg.low { background:var(--low-bg); border-color:var(--low-line); }
+    .seg.medium { background:var(--med-bg); border-color:var(--med-line); }
+    .seg.high { background:var(--high-bg); border-color:var(--high-line); }
+    .seg h4 { margin:0 0 6px; font-size:14px; }
+    .seg.low h4 { color:var(--low); } .seg.medium h4 { color:var(--med); } .seg.high h4 { color:var(--high); }
+    .seg .math { font-family: ui-monospace, Consolas, monospace; font-size:12.5px; color:var(--ink); background:rgba(255,255,255,.6);
+                 border-radius:6px; padding:6px 8px; margin:6px 0; }
+    .seg .meta { font-size:12.5px; color:#37424f; }
     table { width:100%; border-collapse:collapse; font-size:13px; }
-    th, td { border-bottom:1px solid var(--line); padding:7px 8px; text-align:right; }
+    th, td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:right; }
     th:first-child, td:first-child { text-align:left; }
-    thead th { background:#f0f3f7; }
+    thead th { background:#f0f3f7; position:sticky; top:0; }
     tbody tr:hover { background:#f8fafc; }
-    .disclaimer { font-size:12.5px; color:#5a6675; background:#fff8e6;
-                  border:1px solid #f0e0b0; border-radius:8px; padding:14px; line-height:1.6; }
+    .badge { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:3px 10px; border:1px solid; }
+    .badge.low { color:var(--low); background:var(--low-bg); border-color:var(--low-line); }
+    .badge.medium { color:var(--med); background:var(--med-bg); border-color:var(--med-line); }
+    .badge.high { color:var(--high); background:var(--high-bg); border-color:var(--high-line); }
+    .disclaimer { font-size:12.5px; color:var(--muted); background:#fff8e6; border:1px solid #f0e0b0;
+                  border-radius:9px; padding:15px; line-height:1.6; }
+    code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:12px; }
   </style>
 </head>
 <body>
 <header>
   <h1>Customer Risk Value &mdash; Churn &amp; Spend</h1>
-  <p>Upload a churn-feature CSV and a spending-feature CSV. Both models run, then the risk value is computed.</p>
+  <p>Upload a churn-feature CSV and a spending-feature CSV. Both unified Olist models run, then customers are ranked by risk value.</p>
 </header>
 
 <main>
@@ -61,7 +88,7 @@
             Optional: <code>customer_id</code>.</p>
         </div>
       </div>
-      <button type="submit">Predict and calculate risk value</button>
+      <button type="submit">Predict and rank by risk value</button>
     </form>
     {% if churn_error %}<div class="error"><strong>Churn file:</strong> {{ churn_error }}</div>{% endif %}
     {% if spending_error %}<div class="error"><strong>Spending file:</strong> {{ spending_error }}</div>{% endif %}
@@ -69,21 +96,53 @@
 
   {% if results %}
   <div class="card">
-    <h2>2. Results</h2>
-    <div class="summary">
-      <div class="stat">Rows<strong>{{ result_count }}</strong></div>
-      <div class="stat">Mean risk value<strong>R$ {{ mean_risk }}</strong></div>
-      <div class="stat">Total risk value<strong>R$ {{ total_risk }}</strong></div>
+    <h2>2. Results <span class="proto">Prototype estimate &mdash; not validated revenue</span></h2>
+    <p class="hint">{{ pairing_note }} Customers are sorted by Customer risk value (highest first).</p>
+
+    <h3>Summary</h3>
+    <div class="cards">
+      <div class="stat"><span>Customers analysed</span><strong>{{ summary.count }}</strong></div>
+      <div class="stat"><span>Mean churn probability</span><strong>{{ summary.mean_churn }}</strong></div>
+      <div class="stat"><span>Mean predicted spending</span><strong>R$ {{ summary.mean_spending }}</strong></div>
+      <div class="stat"><span>Mean Customer risk value</span><strong>R$ {{ summary.mean_risk }}</strong></div>
+      <div class="stat"><span>Total Customer risk value</span><strong>R$ {{ summary.total_risk }}</strong></div>
     </div>
-    <p class="hint">{{ pairing_note }}</p>
+
+    <h3 style="margin-top:20px;">Risk segments (mathematically defined)</h3>
+    <p class="hint">
+      Risk value is <code>R = P(churn) &times; S&#770;</code>, where <code>P(churn)</code> is the churn probability and
+      <code>S&#770;</code> the predicted next-order spending (BRL). Thresholds are the 33rd / 66th percentiles of the
+      held-out predicted-spending distribution (stored in <code>models/risk_thresholds.json</code>):
+      <code>t1 = {{ risk_thresholds.low_max }}</code>, <code>t2 = {{ risk_thresholds.medium_max }}</code>.
+    </p>
+    <div class="seg-grid">
+      <div class="seg low">
+        <h4>Low risk</h4>
+        <div class="math">R &le; {{ risk_thresholds.low_max }}</div>
+        <div class="meta">{{ summary.low_count }} customers &middot; avg R$ {{ summary.low_avg }}</div>
+      </div>
+      <div class="seg medium">
+        <h4>Medium risk</h4>
+        <div class="math">{{ risk_thresholds.low_max }} &lt; R &le; {{ risk_thresholds.medium_max }}</div>
+        <div class="meta">{{ summary.medium_count }} customers &middot; avg R$ {{ summary.medium_avg }}</div>
+      </div>
+      <div class="seg high">
+        <h4>High risk</h4>
+        <div class="math">R &gt; {{ risk_thresholds.medium_max }}</div>
+        <div class="meta">{{ summary.high_count }} customers &middot; avg R$ {{ summary.high_avg }}</div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:22px;">Ranked customers</h3>
     <table>
       <thead>
         <tr>
           <th>Customer</th>
           <th>Churn probability</th>
           <th>Predicted churn</th>
-          <th>Predicted next-order spending (BRL)</th>
+          <th>Predicted spending (BRL)</th>
           <th>Customer risk value (BRL)</th>
+          <th>Risk segment</th>
         </tr>
       </thead>
       <tbody>
@@ -94,6 +153,7 @@
           <td>{{ r.predicted_churn }}</td>
           <td>{{ r.predicted_next_order_spending_BRL }}</td>
           <td>{{ r.customer_risk_value_BRL }}</td>
+          <td><span class="badge {{ r.risk_segment | lower }}">{{ r.risk_segment }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -102,15 +162,15 @@
   {% endif %}
 
   <div class="card disclaimer">
-    <strong>Disclaimer.</strong> The churn model (Online Retail II) and the spending
-    model (Olist) were trained on two different customer populations with no shared
-    customer identifiers. The <em>Customer Risk Value</em>
-    (&ldquo;Churn Probability &times; Predicted Next-Order Spending&rdquo;) is a
-    <strong>prototype, risk-weighted spending indicator</strong> &mdash; not a validated
-    estimate of recoverable revenue, profit, or the causal financial impact of churn. Rows
-    are matched by <code>customer_id</code> when present in both files, otherwise by row
-    order. Provide your own data or the included <code>sample_inputs/</code> files for
-    demonstration.
+    <strong>Prototype estimate.</strong> Both models are trained on the same unified Olist
+    customer population (repeat customers with &ge; 2 delivered orders). The churn target is
+    heavily imbalanced (~96% of repeat customers are dormant within 150 days), and the spending
+    target is conditional on the customer placing a next order. The
+    <em>Customer Risk Value</em> (&ldquo;Churn Probability &times; Predicted Next-Order Spending&rdquo;)
+    is a <strong>prototype, risk-weighted spending indicator</strong> &mdash; not a validated estimate of
+    recoverable revenue, profit, or the causal financial impact of churn. Rows are matched by
+    <code>customer_id</code> when present in both files, otherwise by row order. Provide your own data
+    or the included <code>sample_inputs/</code> files for demonstration.
   </div>
 </main>
 </body>

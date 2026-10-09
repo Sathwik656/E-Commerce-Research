@@ -1,9 +1,15 @@
 {
   "model": "RandomForestRegressor",
-  "n_estimators": 200,
+  "n_estimators": 300,
   "random_state": 42,
-  "test_size": 0.2,
-  "split": "customer-level (no overlap)",
+  "split": {
+    "train_observations": 1300,
+    "test_observations": 1820,
+    "train_customers": 1178,
+    "test_customers": 1685,
+    "customer_overlap": 62,
+    "split": "temporal (order date < 2018-01-01)"
+  },
   "features": [
     "Recency",
     "PreviousOrderCount",
@@ -18,17 +24,10 @@
   "target": "NextOrderSpending",
   "target_units": "BRL (Brazilian Real)",
   "metrics": {
-    "MAE": 95.208342,
-    "RMSE": 168.48598,
-    "R2": 0.060799,
-    "Median_AE": 56.6951
-  },
-  "split_info": {
-    "train_observations": 2499,
-    "test_observations": 621,
-    "train_customers": 2240,
-    "test_customers": 561,
-    "customer_overlap": 0
+    "MAE": 93.897986,
+    "RMSE": 150.164308,
+    "R2": 0.042581,
+    "Median_AE": 60.520345
   },
   "verification": {
     "model_path": "models/spending_model.pkl",

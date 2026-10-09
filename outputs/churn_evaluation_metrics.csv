@@ -1,6 +1,8 @@
 Metric,Value
-Accuracy,0.6706
-Precision,0.6062
-Recall,0.669
-F1-Score,0.6361
-ROC-AUC,0.7297
+Accuracy,0.9666
+Precision,0.9697
+Recall,0.9966
+F1-Score,0.983
+ROC-AUC,0.739
+PR-AUC,0.987
+ChurnBaseRate,0.9666

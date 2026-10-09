@@ -8,10 +8,10 @@ Batch workflow:
      then computes the prototype Customer Risk Value
      (churn probability x predicted next-order spending).
 
-The risk value combines outputs from two models trained on two different
-customer populations. It is a prototype indicator, not a validated financial
-outcome. When both files contain a `customer_id` column the rows are joined on
-it; otherwise rows are paired by position.
+The risk value combines outputs from two models trained on the SAME unified Olist
+customer population (repeat customers). It is a prototype indicator, not a
+validated financial outcome. When both files contain a `customer_id` column the
+rows are joined on it; otherwise rows are paired by position.
 
 Run:  python app.py
 """
@@ -34,17 +34,34 @@ def load_models():
         churn_features = json.load(fh)["features"]
     with open(MODEL_DIR / "spending_features.json", encoding="utf-8") as fh:
         spending_features = json.load(fh)["features"]
-    return churn_model, spending_model, churn_features, spending_features
+    thresholds = {"low_max": 50.0, "medium_max": 150.0}
+    threshold_path = MODEL_DIR / "risk_thresholds.json"
+    if threshold_path.exists():
+        with open(threshold_path, encoding="utf-8") as fh:
+            thresholds = json.load(fh)
+    return churn_model, spending_model, churn_features, spending_features, thresholds
 
 
-churn_model, spending_model, CHURN_FEATURES, SPENDING_FEATURES = load_models()
+churn_model, spending_model, CHURN_FEATURES, SPENDING_FEATURES, RISK_THRESHOLDS = load_models()
+
+
+def risk_segment(value):
+    if value < RISK_THRESHOLDS["low_max"]:
+        return "Low"
+    if value < RISK_THRESHOLDS["medium_max"]:
+        return "Medium"
+    return "High"
 
 app = Flask(__name__)
 
 
 @app.context_processor
 def inject_features():
-    return {"churn_features": CHURN_FEATURES, "spending_features": SPENDING_FEATURES}
+    return {
+        "churn_features": CHURN_FEATURES,
+        "spending_features": SPENDING_FEATURES,
+        "risk_thresholds": RISK_THRESHOLDS,
+    }
 
 
 def _read_upload(file_storage, feature_list, label, allow_negative=False):
@@ -152,14 +169,35 @@ def predict():
     results["customer_risk_value_BRL"] = np.round(
         results["churn_probability"] * results["predicted_next_order_spending_BRL"], 2
     )
+    results["risk_segment"] = results["customer_risk_value_BRL"].map(risk_segment)
+
+    # Rank customers by risk value (highest risk first).
+    results = results.sort_values(
+        "customer_risk_value_BRL", ascending=False
+    ).reset_index(drop=True)
+
+    counts = results["risk_segment"].value_counts()
+    seg_avg = results.groupby("risk_segment")["customer_risk_value_BRL"].mean()
+    summary = {
+        "count": int(len(results)),
+        "mean_churn": round(float(results["churn_probability"].mean()), 4),
+        "mean_spending": round(float(results["predicted_next_order_spending_BRL"].mean()), 2),
+        "mean_risk": round(float(results["customer_risk_value_BRL"].mean()), 2),
+        "total_risk": round(float(results["customer_risk_value_BRL"].sum()), 2),
+        "low_count": int(counts.get("Low", 0)),
+        "medium_count": int(counts.get("Medium", 0)),
+        "high_count": int(counts.get("High", 0)),
+        "low_avg": round(float(seg_avg.get("Low", 0.0)), 2),
+        "medium_avg": round(float(seg_avg.get("Medium", 0.0)), 2),
+        "high_avg": round(float(seg_avg.get("High", 0.0)), 2),
+    }
 
     return render_template(
         "index.html",
         results=results.to_dict("records"),
         result_count=len(results),
         pairing_note=note,
-        mean_risk=round(float(results["customer_risk_value_BRL"].mean()), 2),
-        total_risk=round(float(results["customer_risk_value_BRL"].sum()), 2),
+        summary=summary,
     )
 
 

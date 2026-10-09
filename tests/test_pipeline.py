@@ -40,8 +40,8 @@ def _upload(churn_bytes, spending_bytes, churn_name="churn.csv", spend_name="spe
 def test_churn_model_loading():
     model = flask_app.churn_model
     assert type(model).__name__ == "RandomForestClassifier"
-    assert model.n_features_in_ == 22
-    assert len(flask_app.CHURN_FEATURES) == 22
+    assert model.n_features_in_ == 12
+    assert len(flask_app.CHURN_FEATURES) == 12
 
     with open(ROOT / "models" / "churn_features.json", encoding="utf-8") as fh:
         saved = json.load(fh)["features"]

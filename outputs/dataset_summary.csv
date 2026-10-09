@@ -1,10 +1,9 @@
 Item,Value
-Raw Olist rows,99441.0
-Cleaned rows,99437.0
-Delivered orders,96477.0
-Customers (delivered),93357.0
-Customers with 2+ orders,2801.0
-Regression observations,3120.0
-NextOrderSpending mean (BRL),146.9248
-NextOrderSpending median (BRL),100.295
+Source,Olist Brazilian E-Commerce (delivered orders)
+Churn horizon (days),150
+Repeat customers (>=2 orders),2801
+Spending observations (train),1300
+Spending observations (test),1820
+NextOrderSpending mean (BRL),146.92
+NextOrderSpending median (BRL),100.3
 NextOrderSpending max (BRL),2621.29

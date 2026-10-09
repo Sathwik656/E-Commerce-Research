@@ -1,15 +1,19 @@
 """
-Model 2 - Customer Next-Order Spending Prediction.
+Model 2 - Customer Next-Order Spending Prediction (unified Olist design).
 
-End-to-end pipeline (Tasks 4 - 6.7):
-  * clean the Brazilian Olist order dataset
-  * build customer-level historical features and the next-order spending target
-  * customer-level train/test split
-  * train / evaluate a Random Forest Regressor (200 trees)
-  * feature importance, save + reload verification
-  * write research tables/figures to outputs/ and the model to models/
+Population  : repeat Olist customers (>= 2 delivered orders)
+Features    : historical features computed from the customer's PRIOR orders
+              only (no leakage from the target order)
+Target      : NextOrderSpending = payment value of the customer's next order
+              (conditional on that order existing - repeat customers only)
+Evaluation  : out-of-time - trained on orders placed before 2018-01-01, tested
+              on orders placed after.
 
-Run:  python train_spending.py
+Reads data/olist_spending_dataset_prepared.csv (built by prepare_data.py),
+trains / evaluates a Random Forest Regressor, writes research outputs to
+outputs/, and saves the model + ordered feature names to models/.
+
+Run:  python prepare_data.py && python train_spending.py
 """
 
 from pathlib import Path
@@ -24,13 +28,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     mean_absolute_error,
     mean_squared_error,
     r2_score,
     median_absolute_error,
 )
+
+from prepare_data import SPENDING_FEATURES, TRAIN_CUT
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -40,115 +45,23 @@ for _d in (MODEL_DIR, OUT_DIR):
     _d.mkdir(exist_ok=True)
 
 RANDOM_STATE = 42
-N_ESTIMATORS = 200
-TEST_SIZE = 0.20
-
-# Order matters: the Flask app must present features in exactly this order.
-SPENDING_FEATURES = [
-    "Recency",
-    "PreviousOrderCount",
-    "HistoricalSpending",
-    "TotalItems",
-    "TotalProducts",
-    "TotalSellers",
-    "AverageOrderValue",
-    "AverageFreightValue",
-    "AverageInstallments",
-]
-
-# Target order columns (current order) must never leak into the features.
-REQUIRED_COLUMNS = [
-    "customer_unique_id",
-    "order_purchase_timestamp",
-    "payment_value",
-    "number_of_items",
-    "number_of_products",
-    "number_of_sellers",
-    "total_item_price",
-    "total_freight_value",
-    "payment_installments",
-]
+N_ESTIMATORS = 300
 
 
-# --------------------------------------------------------------------------- #
-# Task 4 - inspect & clean
-# --------------------------------------------------------------------------- #
-def clean_olist(path=None):
-    path = path or DATA_DIR / "olist_spending_dataset.csv"
-    df = pd.read_csv(path)
-
-    clean = df.copy()
-    clean["order_purchase_timestamp"] = pd.to_datetime(
-        clean["order_purchase_timestamp"], errors="coerce"
-    )
-    clean = clean.dropna(subset=["customer_unique_id", "order_purchase_timestamp"])
-    clean = clean[clean["payment_value"] > 0].copy()
-    return clean
+def load_dataset():
+    df = pd.read_csv(DATA_DIR / "olist_spending_dataset_prepared.csv")
+    df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
+    train = df[df["split"] == "train"].copy()
+    test = df[df["split"] == "test"].copy()
+    for part in (train, test):
+        if part[SPENDING_FEATURES].isnull().any().any():
+            raise ValueError("Spending feature matrix contains missing values.")
+    return df, train, test
 
 
-# --------------------------------------------------------------------------- #
-# Task 5 - features + next-order target
-# --------------------------------------------------------------------------- #
-def build_spending_dataset(clean):
-    delivered = clean[clean["order_status"] == "delivered"].copy()
-    delivered = delivered.dropna(subset=REQUIRED_COLUMNS).copy()
-    delivered = delivered.sort_values(
-        by=["customer_unique_id", "order_purchase_timestamp"]
-    ).reset_index(drop=True)
-
-    g = delivered.groupby("customer_unique_id")
-
-    delivered["PreviousOrderCount"] = g.cumcount()
-    delivered["NextOrderSpending"] = delivered["payment_value"]
-
-    def prior_cumsum(col):
-        return g[col].cumsum() - delivered[col]
-
-    delivered["HistoricalSpending"] = prior_cumsum("payment_value")
-    delivered["TotalItems"] = prior_cumsum("number_of_items")
-    delivered["TotalProducts"] = prior_cumsum("number_of_products")
-    delivered["TotalSellers"] = prior_cumsum("number_of_sellers")
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        delivered["AverageOrderValue"] = (
-            delivered["HistoricalSpending"] / delivered["PreviousOrderCount"]
-        )
-        delivered["AverageFreightValue"] = (
-            prior_cumsum("total_freight_value") / delivered["PreviousOrderCount"]
-        )
-        delivered["AverageInstallments"] = (
-            prior_cumsum("payment_installments") / delivered["PreviousOrderCount"]
-        )
-
-    delivered["PreviousPurchaseDate"] = g["order_purchase_timestamp"].shift(1)
-    delivered["Recency"] = (
-        delivered["order_purchase_timestamp"] - delivered["PreviousPurchaseDate"]
-    ).dt.total_seconds() / 86400.0
-
-    # First order per customer has no history -> drop it.
-    obs = delivered[delivered["PreviousOrderCount"] > 0].copy()
-    obs = obs[["customer_unique_id", *SPENDING_FEATURES, "NextOrderSpending"]]
-    return delivered, obs
-
-
-# --------------------------------------------------------------------------- #
-# Task 6.3 - 6.7
-# --------------------------------------------------------------------------- #
-def train_and_evaluate(spending_features):
-    X = spending_features[SPENDING_FEATURES].copy()
-    y = spending_features["NextOrderSpending"].copy()
-    customer_ids = spending_features["customer_unique_id"].copy()
-
-    train_customers, test_customers = train_test_split(
-        customer_ids.unique(), test_size=TEST_SIZE, random_state=RANDOM_STATE
-    )
-    train_mask = customer_ids.isin(train_customers)
-    test_mask = customer_ids.isin(test_customers)
-
-    X_train, X_test = X[train_mask].copy(), X[test_mask].copy()
-    y_train, y_test = y[train_mask].copy(), y[test_mask].copy()
-
-    overlap = len(set(train_customers).intersection(set(test_customers)))
+def train_and_evaluate(train, test):
+    X_train, y_train = train[SPENDING_FEATURES], train["NextOrderSpending"]
+    X_test, y_test = test[SPENDING_FEATURES], test["NextOrderSpending"]
 
     model = RandomForestRegressor(
         n_estimators=N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1
@@ -165,24 +78,29 @@ def train_and_evaluate(spending_features):
         "Median_AE": median_absolute_error(y_test, y_pred),
     }
 
-    importance = pd.DataFrame(
-        {"Feature": SPENDING_FEATURES, "Importance": model.feature_importances_}
-    ).sort_values("Importance", ascending=False).reset_index(drop=True)
+    importance = (
+        pd.DataFrame({"Feature": SPENDING_FEATURES, "Importance": model.feature_importances_})
+        .sort_values("Importance", ascending=False)
+        .reset_index(drop=True)
+    )
 
+    train_customers = set(train["customer_unique_id"])
+    test_customers = set(test["customer_unique_id"])
     split_info = {
         "train_observations": int(len(X_train)),
         "test_observations": int(len(X_test)),
-        "train_customers": int(len(train_customers)),
-        "test_customers": int(len(test_customers)),
-        "customer_overlap": int(overlap),
+        "train_customers": len(train_customers),
+        "test_customers": len(test_customers),
+        "customer_overlap": len(train_customers & test_customers),
+        "split": f"temporal (order date < {TRAIN_CUT.date()})",
     }
 
     predictions = pd.DataFrame(
         {
             "observation_id": np.arange(1, len(y_test) + 1),
             "Actual_NextOrderSpending": y_test.values,
-            "Predicted_NextOrderSpending": y_pred,
-            "Residual": residuals,
+            "Predicted_NextOrderSpending": np.round(y_pred, 4),
+            "Residual": np.round(residuals, 4),
         }
     )
 
@@ -195,8 +113,8 @@ def train_and_evaluate(spending_features):
         "y_test": y_test,
         "y_pred": y_pred,
         "residuals": residuals,
-        "X": X,
-        "y": y,
+        "train": train,
+        "test": test,
     }
 
 
@@ -204,19 +122,17 @@ def save_and_verify(result):
     model_path = MODEL_DIR / "spending_model.pkl"
     joblib.dump(result["model"], model_path)
 
-    features_path = MODEL_DIR / "spending_features.json"
-    with open(features_path, "w", encoding="utf-8") as fh:
+    with open(MODEL_DIR / "spending_features.json", "w", encoding="utf-8") as fh:
         json.dump({"features": SPENDING_FEATURES}, fh, indent=2)
 
     reloaded = joblib.load(model_path)
-    sample = result["X"]
-    original = result["model"].predict(sample)
-    loaded = reloaded.predict(sample)
-
+    sample = result["test"][SPENDING_FEATURES]
     verification = {
-        "model_path": str(model_path.relative_to(ROOT)).replace("\\", "/"),
-        "features_path": str(features_path.relative_to(ROOT)).replace("\\", "/"),
-        "predictions_identical": bool(np.allclose(original, loaded)),
+        "model_path": "models/spending_model.pkl",
+        "features_path": "models/spending_features.json",
+        "predictions_identical": bool(
+            np.allclose(result["model"].predict(sample), reloaded.predict(sample))
+        ),
         "model_type": type(reloaded).__name__,
         "n_features": int(reloaded.n_features_in_),
     }
@@ -230,9 +146,8 @@ def plot_feature_importance(importance, path):
     fig, ax = plt.subplots(figsize=(8, 5))
     data = importance.sort_values("Importance")
     ax.barh(data["Feature"], data["Importance"], color="#3b6ea5")
-    ax.set_xlabel("Feature Importance (mean decrease in impurity)")
-    ax.set_ylabel("Feature")
-    ax.set_title("Feature Importance - Next-Order Spending Prediction")
+    ax.set_xlabel("Feature importance (mean decrease in impurity)")
+    ax.set_title("Feature Importance - Next-Order Spending (Olist)")
     fig.tight_layout()
     fig.savefig(path, dpi=300)
     plt.close(fig)
@@ -278,10 +193,13 @@ def plot_target_distribution(y, path):
 
 
 # --------------------------------------------------------------------------- #
-# Risk value demonstration (Task 7)
+# Risk value (Task 7): transparent, documented prototype formula
 # --------------------------------------------------------------------------- #
 def build_risk_examples(predictions):
-    sample = predictions.head(5).copy()
+    """Sensitivity of the risk formula to the churn probability."""
+    sample = predictions.sort_values(
+        "Predicted_NextOrderSpending", ascending=False
+    ).head(5)
     rows = []
     for i, (_, row) in enumerate(sample.iterrows(), start=1):
         predicted = float(row["Predicted_NextOrderSpending"])
@@ -290,39 +208,26 @@ def build_risk_examples(predictions):
                 {
                     "example_id": i,
                     "churn_probability": churn_p,
-                    "predicted_next_order_spending_BRL": round(predicted, 4),
-                    "customer_risk_value_BRL": round(churn_p * predicted, 4),
+                    "predicted_next_order_spending_BRL": round(predicted, 2),
+                    "customer_risk_value_BRL": round(churn_p * predicted, 2),
                 }
             )
     return pd.DataFrame(rows)
 
 
-# --------------------------------------------------------------------------- #
 def main():
-    print("Loading and cleaning Olist data ...")
-    clean = clean_olist()
-    delivered, spending_features = build_spending_dataset(clean)
+    print("Loading unified Olist next-order spending dataset ...")
+    full, train, test = load_dataset()
+    print(f"  train observations: {len(train)}  test observations: {len(test)}")
 
-    print(f"Cleaned rows: {len(clean)}")
-    print(f"Delivered orders: {len(delivered)}")
-    print(
-        "Customers in delivered data:",
-        delivered["customer_unique_id"].nunique(),
-    )
-    order_counts = delivered.groupby("customer_unique_id")["order_id"].nunique()
-    print("Customers with 2+ orders:", int((order_counts >= 2).sum()))
-    print("Regression observations:", len(spending_features))
-    print("Missing values in features:", int(spending_features.isnull().sum().sum()))
-
-    result = train_and_evaluate(spending_features)
+    result = train_and_evaluate(train, test)
     model_path, verification = save_and_verify(result)
 
-    print("\n-- Evaluation (held-out customers) --")
+    print("\n-- Out-of-time evaluation (orders after 2018-01-01) --")
     for name, value in result["metrics"].items():
         print(f"{name}: {value:.4f}")
     print("Split info:", result["split_info"])
 
-    # ---- persist tables ----
     metrics_rows = [
         {"Metric": "MAE", "Value": round(result["metrics"]["MAE"], 4)},
         {"Metric": "RMSE", "Value": round(result["metrics"]["RMSE"], 4)},
@@ -332,48 +237,44 @@ def main():
     pd.DataFrame(metrics_rows).to_csv(
         OUT_DIR / "spending_evaluation_metrics.csv", index=False
     )
-    result["importance"].to_csv(
-        OUT_DIR / "spending_feature_importance.csv", index=False
-    )
+    result["importance"].to_csv(OUT_DIR / "spending_feature_importance.csv", index=False)
     result["predictions"].to_csv(OUT_DIR / "spending_predictions.csv", index=False)
     build_risk_examples(result["predictions"]).to_csv(
         OUT_DIR / "customer_risk_value_examples.csv", index=False
     )
 
-    # ---- figures ----
-    plot_feature_importance(
-        result["importance"], OUT_DIR / "spending_feature_importance.png"
-    )
+    # Data-driven risk-value thresholds (tertiles of predicted spending, since
+    # the churn probability is ~constant on this minority repeatedly-buying
+    # population). Documented as prototype cut-offs, not validated figures.
+    p33, p66 = np.percentile(result["y_pred"], [33, 66])
+    with open(MODEL_DIR / "risk_thresholds.json", "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "basis": "churn_probability * predicted_next_order_spending (BRL)",
+                "low_max": round(float(p33), 2),
+                "medium_max": round(float(p66), 2),
+            },
+            fh,
+            indent=2,
+        )
+
+    plot_feature_importance(result["importance"], OUT_DIR / "spending_feature_importance.png")
     plot_actual_vs_predicted(
         result["y_test"], result["y_pred"], OUT_DIR / "spending_actual_vs_predicted.png"
     )
     plot_residuals(result["residuals"], OUT_DIR / "spending_residuals.png")
-    plot_target_distribution(result["y"], OUT_DIR / "spending_target_distribution.png")
+    plot_target_distribution(full["NextOrderSpending"], OUT_DIR / "spending_target_distribution.png")
 
-    # ---- dataset summary + config ----
     summary = pd.DataFrame(
         [
-            {"Item": "Raw Olist rows", "Value": 99441},
-            {"Item": "Cleaned rows", "Value": len(clean)},
-            {"Item": "Delivered orders", "Value": len(delivered)},
-            {
-                "Item": "Customers (delivered)",
-                "Value": int(delivered["customer_unique_id"].nunique()),
-            },
-            {"Item": "Customers with 2+ orders", "Value": int((order_counts >= 2).sum())},
-            {"Item": "Regression observations", "Value": len(spending_features)},
-            {
-                "Item": "NextOrderSpending mean (BRL)",
-                "Value": round(float(spending_features["NextOrderSpending"].mean()), 4),
-            },
-            {
-                "Item": "NextOrderSpending median (BRL)",
-                "Value": round(float(spending_features["NextOrderSpending"].median()), 4),
-            },
-            {
-                "Item": "NextOrderSpending max (BRL)",
-                "Value": round(float(spending_features["NextOrderSpending"].max()), 4),
-            },
+            {"Item": "Source", "Value": "Olist Brazilian E-Commerce (delivered orders)"},
+            {"Item": "Churn horizon (days)", "Value": 150},
+            {"Item": "Repeat customers (>=2 orders)", "Value": int(full["customer_unique_id"].nunique())},
+            {"Item": "Spending observations (train)", "Value": int(len(train))},
+            {"Item": "Spending observations (test)", "Value": int(len(test))},
+            {"Item": "NextOrderSpending mean (BRL)", "Value": round(float(full["NextOrderSpending"].mean()), 2)},
+            {"Item": "NextOrderSpending median (BRL)", "Value": round(float(full["NextOrderSpending"].median()), 2)},
+            {"Item": "NextOrderSpending max (BRL)", "Value": round(float(full["NextOrderSpending"].max()), 2)},
         ]
     )
     summary.to_csv(OUT_DIR / "dataset_summary.csv", index=False)
@@ -382,13 +283,11 @@ def main():
         "model": "RandomForestRegressor",
         "n_estimators": N_ESTIMATORS,
         "random_state": RANDOM_STATE,
-        "test_size": TEST_SIZE,
-        "split": "customer-level (no overlap)",
+        "split": result["split_info"],
         "features": SPENDING_FEATURES,
         "target": "NextOrderSpending",
         "target_units": "BRL (Brazilian Real)",
         "metrics": {k: round(v, 6) for k, v in result["metrics"].items()},
-        "split_info": result["split_info"],
         "verification": verification,
     }
     with open(OUT_DIR / "experiment_configuration.json", "w", encoding="utf-8") as fh:
@@ -396,7 +295,6 @@ def main():
 
     print("\nModel saved to:", model_path)
     print("Reload verification:", verification)
-    print("Outputs written to:", OUT_DIR)
 
 
 if __name__ == "__main__":

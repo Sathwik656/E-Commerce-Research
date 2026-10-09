@@ -1,0 +1,5 @@
+{
+  "basis": "churn_probability * predicted_next_order_spending (BRL)",
+  "low_max": 116.62,
+  "medium_max": 165.09
+}
