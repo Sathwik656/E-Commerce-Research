@@ -45,7 +45,11 @@ for _d in (MODEL_DIR, OUT_DIR):
     _d.mkdir(exist_ok=True)
 
 RANDOM_STATE = 42
-N_ESTIMATORS = 300
+N_ESTIMATORS = 350
+CRITERION = "poisson"
+MAX_DEPTH = 6
+MIN_SAMPLES_LEAF = 2
+MAX_FEATURES = 1.0
 
 
 def load_dataset():
@@ -63,12 +67,27 @@ def train_and_evaluate(train, test):
     X_train, y_train = train[SPENDING_FEATURES], train["NextOrderSpending"]
     X_test, y_test = test[SPENDING_FEATURES], test["NextOrderSpending"]
 
+    # Baseline unconstrained model (for benchmark comparison & tier calibration plot)
+    baseline_model = RandomForestRegressor(
+        n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1
+    )
+    baseline_model.fit(X_train, y_train)
+    baseline_pred = np.clip(baseline_model.predict(X_test), 0, None)
+
+    # Improved model: Poisson deviance criterion tailored for right-skewed spending,
+    # with tree depth and leaf regularization to preserve high-spenders while reducing variance
     model = RandomForestRegressor(
-        n_estimators=N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1
+        n_estimators=N_ESTIMATORS,
+        criterion=CRITERION,
+        max_depth=MAX_DEPTH,
+        min_samples_leaf=MIN_SAMPLES_LEAF,
+        max_features=MAX_FEATURES,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
     )
     model.fit(X_train, y_train)
 
-    y_pred = model.predict(X_test)
+    y_pred = np.clip(model.predict(X_test), 0, None)
     residuals = y_test.values - y_pred
 
     metrics = {
@@ -76,6 +95,13 @@ def train_and_evaluate(train, test):
         "RMSE": float(np.sqrt(mean_squared_error(y_test, y_pred))),
         "R2": r2_score(y_test, y_pred),
         "Median_AE": median_absolute_error(y_test, y_pred),
+    }
+
+    baseline_metrics = {
+        "MAE": mean_absolute_error(y_test, baseline_pred),
+        "RMSE": float(np.sqrt(mean_squared_error(y_test, baseline_pred))),
+        "R2": r2_score(y_test, baseline_pred),
+        "Median_AE": median_absolute_error(y_test, baseline_pred),
     }
 
     importance = (
@@ -98,8 +124,10 @@ def train_and_evaluate(train, test):
     predictions = pd.DataFrame(
         {
             "observation_id": np.arange(1, len(y_test) + 1),
+            "customer_unique_id": test["customer_unique_id"].values,
             "Actual_NextOrderSpending": y_test.values,
             "Predicted_NextOrderSpending": np.round(y_pred, 4),
+            "Baseline_Predicted_NextOrderSpending": np.round(baseline_pred, 4),
             "Residual": np.round(residuals, 4),
         }
     )
@@ -107,11 +135,13 @@ def train_and_evaluate(train, test):
     return {
         "model": model,
         "metrics": metrics,
+        "baseline_metrics": baseline_metrics,
         "importance": importance,
         "predictions": predictions,
         "split_info": split_info,
         "y_test": y_test,
         "y_pred": y_pred,
+        "baseline_pred": baseline_pred,
         "residuals": residuals,
         "train": train,
         "test": test,
@@ -155,9 +185,9 @@ def plot_feature_importance(importance, path):
 
 def plot_actual_vs_predicted(y_test, y_pred, path):
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(y_test, y_pred, alpha=0.4, s=18, color="#3b6ea5", edgecolor="none")
+    ax.scatter(y_test, y_pred, alpha=0.45, s=20, color="#3b6ea5", edgecolor="none")
     lims = [0, float(max(np.max(y_test), np.max(y_pred)))]
-    ax.plot(lims, lims, "r--", linewidth=1, label="Perfect prediction")
+    ax.plot(lims, lims, "r--", linewidth=1.2, label="Perfect prediction")
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.set_xlabel("Actual next-order spending (BRL)")
@@ -224,8 +254,10 @@ def main():
     model_path, verification = save_and_verify(result)
 
     print("\n-- Out-of-time evaluation (orders after 2018-01-01) --")
+    print(f"Improved Model: RandomForestRegressor (criterion={CRITERION}, max_depth={MAX_DEPTH}, min_samples_leaf={MIN_SAMPLES_LEAF})")
     for name, value in result["metrics"].items():
-        print(f"{name}: {value:.4f}")
+        base_val = result["baseline_metrics"].get(name, 0.0)
+        print(f"{name}: {value:.4f}  (Baseline MSE: {base_val:.4f})")
     print("Split info:", result["split_info"])
 
     metrics_rows = [
@@ -243,9 +275,27 @@ def main():
         OUT_DIR / "customer_risk_value_examples.csv", index=False
     )
 
-    # Data-driven risk-value thresholds (tertiles of predicted spending, since
-    # the churn probability is ~constant on this minority repeatedly-buying
-    # population). Documented as prototype cut-offs, not validated figures.
+    # In-depth high-spending investigation: customers with actual spending > 300 BRL
+    high_spenders = (
+        result["predictions"][result["predictions"]["Actual_NextOrderSpending"] > 300]
+        .copy()
+        .merge(
+            test[["customer_unique_id", "AverageOrderValue", "HistoricalSpending", "AverageFreightValue", "PreviousOrderCount"]],
+            on="customer_unique_id",
+            how="left",
+        )
+    )
+    high_spenders["Absolute_Error"] = np.abs(
+        high_spenders["Actual_NextOrderSpending"] - high_spenders["Predicted_NextOrderSpending"]
+    )
+    high_spenders["Baseline_Absolute_Error"] = np.abs(
+        high_spenders["Actual_NextOrderSpending"] - high_spenders["Baseline_Predicted_NextOrderSpending"]
+    )
+    high_spenders["Improvement"] = high_spenders["Baseline_Absolute_Error"] - high_spenders["Absolute_Error"]
+    high_spenders = high_spenders.sort_values("Actual_NextOrderSpending", ascending=False).reset_index(drop=True)
+    high_spenders.to_csv(OUT_DIR / "spending_high_spenders_analysis.csv", index=False)
+    print(f"High-spenders analysis written ({len(high_spenders)} orders > 300 BRL):", OUT_DIR / "spending_high_spenders_analysis.csv")
+
     p33, p66 = np.percentile(result["y_pred"], [33, 66])
     with open(MODEL_DIR / "risk_thresholds.json", "w", encoding="utf-8") as fh:
         json.dump(
@@ -260,7 +310,9 @@ def main():
 
     plot_feature_importance(result["importance"], OUT_DIR / "spending_feature_importance.png")
     plot_actual_vs_predicted(
-        result["y_test"], result["y_pred"], OUT_DIR / "spending_actual_vs_predicted.png"
+        result["y_test"],
+        result["y_pred"],
+        OUT_DIR / "spending_actual_vs_predicted.png",
     )
     plot_residuals(result["residuals"], OUT_DIR / "spending_residuals.png")
     plot_target_distribution(full["NextOrderSpending"], OUT_DIR / "spending_target_distribution.png")
@@ -281,6 +333,10 @@ def main():
 
     config = {
         "model": "RandomForestRegressor",
+        "criterion": CRITERION,
+        "max_depth": MAX_DEPTH,
+        "min_samples_leaf": MIN_SAMPLES_LEAF,
+        "max_features": MAX_FEATURES,
         "n_estimators": N_ESTIMATORS,
         "random_state": RANDOM_STATE,
         "split": result["split_info"],
@@ -288,6 +344,7 @@ def main():
         "target": "NextOrderSpending",
         "target_units": "BRL (Brazilian Real)",
         "metrics": {k: round(v, 6) for k, v in result["metrics"].items()},
+        "baseline_metrics": {k: round(v, 6) for k, v in result["baseline_metrics"].items()},
         "verification": verification,
     }
     with open(OUT_DIR / "experiment_configuration.json", "w", encoding="utf-8") as fh:

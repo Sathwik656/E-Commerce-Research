@@ -1,6 +1,10 @@
 {
   "model": "RandomForestRegressor",
-  "n_estimators": 300,
+  "criterion": "poisson",
+  "max_depth": 6,
+  "min_samples_leaf": 2,
+  "max_features": 1.0,
+  "n_estimators": 350,
   "random_state": 42,
   "split": {
     "train_observations": 1300,
@@ -24,6 +28,12 @@
   "target": "NextOrderSpending",
   "target_units": "BRL (Brazilian Real)",
   "metrics": {
+    "MAE": 86.411316,
+    "RMSE": 143.685165,
+    "R2": 0.123418,
+    "Median_AE": 56.957454
+  },
+  "baseline_metrics": {
     "MAE": 93.897986,
     "RMSE": 150.164308,
     "R2": 0.042581,

@@ -26,7 +26,7 @@ same Olist source and the same customer population**.
 | Spending target | next-order value (customer-random split) | next-order value (out-of-time split) |
 | Split | churn: stratified random; spending: customer-random | both **out-of-time** (chronological) |
 | Churn ROC-AUC | 0.7297 (held-out) | **0.7445** (out-of-time) |
-| Spending R² | 0.0608 | **0.0426** (out-of-time) |
+| Spending R² | 0.0608 | **0.1234** (out-of-time, improved Poisson RF) |
 
 The redesign also rebuilds the data layer directly from the raw Olist CSV tables
 (`prepare_data.py`), so both models share one reproducible customer definition
@@ -150,16 +150,18 @@ at 0/1, so the app's per-customer churn probabilities are informative.
 - **Target:** `NextOrderSpending` = payment value of the customer's next order.
   The target is **conditional on a subsequent order existing** — a customer who
   never reorders is not represented in the regression set.
-- **Estimator:** `RandomForestRegressor(n_estimators=300, random_state=42)`.
+- **Estimator:** `RandomForestRegressor(n_estimators=350, criterion='poisson', max_depth=6, min_samples_leaf=2, max_features=1.0, random_state=42)`.
+  The Poisson deviance criterion specifically models non-negative, right-skewed spending amounts,
+  while tree depth and leaf regularization mitigate variance and enable better capture of upper-end spenders.
 
 ### Actual results (test: 1,820 orders placed after 2018-01-01)
 
-| Metric | Value |
-|---|---:|
-| MAE (BRL) | 93.8980 |
-| RMSE (BRL) | 150.1643 |
-| **R²** | **0.0426** |
-| Median AE (BRL) | 60.5203 |
+| Metric | Baseline (MSE) | Improved (Poisson) | Change |
+|---|---:|---:|---:|
+| **R²** | 0.0426 | **0.1234** | **+0.0808 (~3x higher)** |
+| MAE (BRL) | 93.8980 | **86.4113** | **-7.49 BRL** |
+| RMSE (BRL) | 150.1643 | **143.6852** | **-6.48 BRL** |
+| Median AE (BRL) | 60.5203 | **56.9575** | **-3.56 BRL** |
 
 Split: 1,300 train obs / 1,820 test obs; 1,178 train customers / 1,685 test
 customers; 62 customers appear in both (expected for a chronological split, and
@@ -167,21 +169,19 @@ each of their orders still contributes only prior-order features).
 
 Predicted vs actual (`outputs/spending_predictions.csv`):
 
-| Statistic | Actual (BRL) | Predicted (BRL) | Residual (BRL) |
+| Statistic | Actual (BRL) | Baseline (BRL) | Improved (BRL) |
 |---|---:|---:|---:|
-| Mean | 148.75 | 157.70 | -8.94 |
-| Std | 153.51 | 82.97 | 149.94 |
-| Min | 11.56 | 26.83 | -739.41 |
-| Median | 104.40 | 137.36 | -28.30 |
-| Max | 1435.97 | 797.11 | 1314.01 |
+| Mean | 148.75 | 157.70 | **149.90** |
+| Std | 153.51 | 82.97 | **76.96** |
+| Min | 11.56 | 26.83 | **24.70** |
+| Median | 104.40 | 137.36 | **129.30** |
+| Max | 1435.97 | 797.11 | **1075.52** |
 
-**Interpretation.** R² = 0.043 means prior-order history explains ~4% of
-held-out next-order variance; this is a **weak but positive** signal (not
-negative, i.e. better than predicting the mean). The predicted range is much
-narrower than the actual range — the regressor shrinks toward the mean, typical
-for tree ensembles on skewed monetary targets. The out-of-time split is stricter
-than the old random split, which is why R² is slightly lower than the previous
-0.0608.
+**Interpretation & High-Spender Investigation.**
+The baseline MSE model suffered from heavy regression toward the mean, capping predictions under 798 BRL. By adopting the Poisson loss function and regularizing tree depth (`max_depth=6`, `min_samples_leaf=2`), the model's dynamic range expanded up to **1075.52 BRL** and held-out explained variance nearly tripled to **R² = 0.1234**.
+Investigation of high spenders (`outputs/spending_high_spenders_analysis.csv`, 221 orders > 300 BRL) revealed two customer regimes:
+1. *Consistent high spenders* (customers with prior AOV > 500 BRL): The improved model captures these significantly better (e.g., predicting ~920–967 BRL for 1200+ BRL orders where baseline predicted under 485–650 BRL, cutting absolute error by over 300–430 BRL).
+2. *Spending surges* (customers with low prior order history, ~50 BRL, whose next purchase was an unexpected big-ticket item): Purely historical prior-order features have natural information limits for surge purchases, which is discussed as a behavioral characteristic of general marketplaces.
 
 ### Spending feature importance
 
