@@ -204,13 +204,20 @@ For each order, features are **cumulative sums of all previous orders only** (st
 | Hyperparameter | Value | Rationale |
 |---|---|---|
 | `n_estimators` | 500 | Larger forest for variance reduction |
-| `max_depth` | 8 | Limits overfitting on a small, imbalanced cohort |
-| `min_samples_leaf` | 2 | Regularisation on small leaf nodes |
-| `class_weight` | `balanced` | Counteracts the ~96% churn base rate |
+| `max_depth` | 4 | Regularised, shallow trees; spreads predicted probabilities |
+| `min_samples_leaf` | 100 | Strong regularisation so leaves are not dominated by noise |
+| `max_features` | `sqrt` | Standard RF split rule |
 | `random_state` | 42 | Reproducibility |
 | `n_jobs` | -1 | Parallel training on all CPU cores |
 
-**Cross-Validation:** 5-fold Stratified K-Fold on the training snapshot.
+**Class balancing:** the repeat-cohort snapshot is ~96% "not churned", so the
+minority class is **randomly oversampled to 50/50** before training, and the
+held-out snapshot is **class-balanced** (undersample the majority) for the
+headline evaluation. Hyperparameters were chosen by 5-fold cross-validation on
+the training snapshot (maximising balanced accuracy).
+
+**Cross-Validation:** 5-fold Stratified K-Fold on the training snapshot, with
+the minority oversampled inside each fold.
 
 ### Model 2 — Random Forest Regressor (Spending Prediction)
 
@@ -289,14 +296,14 @@ Flask>=3.0
              ▼                              ▼
   ┌──────────────────────────┐   ┌──────────────────────────┐
   │  RandomForest Classifier │   │  RandomForest Regressor  │
-  │  500 trees, depth=8      │   │  300 trees               │
+  │  500 trees, depth=4      │   │  300 trees               │
   └──────────┬───────────────┘   └──────────┬───────────────┘
              │                              │
              ▼                              ▼
   ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  ROC-AUC: 0.7390         │   │  MAE: 93.90 BRL          │
-  │  PR-AUC:  0.9870         │   │  RMSE: 150.16 BRL        │
-  │  Acc:     0.9666         │   │  R²:   0.0426            │
+  │  ROC-AUC: 0.7445         │   │  MAE: 93.90 BRL          │
+  │  PR-AUC:  0.7233 (bal.)  │   │  RMSE: 150.16 BRL        │
+  │  Acc:     0.6148 (bal.)  │   │  R²:   0.0426            │
   └──────────┬───────────────┘   └──────────┬───────────────┘
              │                              │
              ▼                              ▼
@@ -480,6 +487,9 @@ sample_inputs/churn_input.csv
 sample_inputs/spending_input.csv
 ```
 
+The 10 sample customers are chosen so the demo output exercises **all three risk
+segments** — Low, Medium and High (4 / 3 / 3).
+
 **Churn CSV required columns (12):**
 ```
 Recency, Frequency, Monetary, TotalItems, TotalProducts, TotalSellers,
@@ -518,7 +528,10 @@ Returns **HTTP 400** with a descriptive error message per file.
 
 ### Model 1: Churn Classifier — What It Evaluates
 
-The churn model evaluates **binary classification** out-of-time on the 2018-04-01 snapshot (1,829 customers, churn base rate 96.7%):
+The churn model evaluates **binary classification** out-of-time on the 2018-04-01
+snapshot. Because the raw snapshot is ~96.7% churn (1,829 customers), headline
+metrics use a **class-balanced** version of it (122 customers, 50% base rate),
+and the full imbalanced set is also scored for the threshold-free ROC-AUC:
 
 | Metric | Formula | What It Tells You |
 |---|---|---|
@@ -545,26 +558,33 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 ## 15. Outputs and Results
 
-### Churn Model Results (out-of-time: 2018-04-01 snapshot, 1,829 customers, base rate 96.7%)
+### Churn Model Results (out-of-time: 2018-04-01 snapshot)
+
+**Headline — class-balanced evaluation (122 customers, base rate 50%):**
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.9666 |
-| Precision (Churned) | 0.9697 |
-| Recall (Churned) | 0.9966 |
-| F1-Score (Churned) | 0.9830 |
-| **ROC-AUC** | **0.7390** |
-| PR-AUC | 0.9870 |
-| 5-fold CV ROC-AUC (train snapshot) | 0.6313 |
+| Accuracy | 0.6148 |
+| Precision (Churned) | 0.5946 |
+| Recall (Churned) | 0.7213 |
+| F1-Score (Churned) | 0.6519 |
+| **ROC-AUC** | **0.7046** |
+| PR-AUC | 0.7233 |
+| 5-fold CV ROC-AUC (train snapshot) | 0.6461 |
 
-**Confusion Matrix:**
+**Confusion Matrix (class-balanced test):**
 
 |  | Predicted: Not Churned | Predicted: Churned |
 |---|---:|---:|
-| **Actual: Not Churned** | 6 (TN) | 55 (FP) |
-| **Actual: Churned** | 6 (FN) | 1762 (TP) |
+| **Actual: Not Churned** | 31 (TN) | 30 (FP) |
+| **Actual: Churned** | 17 (FN) | 44 (TP) |
 
-> Because churn is a ~96% base-rate event, accuracy is only trivially above the base rate and should **not** be read as skill. The minority "Not Churned" class has precision 0.50 / recall 0.10. **ROC-AUC = 0.739** is the honest headline (ranked risk is meaningfully better than random).
+> The raw snapshot is ~96.7% churn, so the minority class is oversampled to
+> 50/50 for training and the held-out snapshot is balanced for the headline
+> metrics — this makes both classes visible instead of the degenerate
+> `[[6,55],[6,1762]]` matrix. On the **full** imbalanced test set (1,829
+> customers, base rate 96.7%) the same model scores **ROC-AUC 0.7445**, the
+> honest threshold-free headline. Accuracy on a 96.7%-churn set is not skill.
 
 ### Spending Model Results (out-of-time: 1,820 orders after 2018-01-01)
 
@@ -593,18 +613,18 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 | Rank | Feature | Importance |
 |---:|---|---:|
-| 1 | Recency | 0.173 |
-| 2 | Monetary | 0.138 |
-| 3 | AverageOrderValue | 0.125 |
-| 4 | AverageFreight | 0.111 |
-| 5 | Tenure | 0.102 |
-| 6 | AverageInstallments | 0.098 |
-| 7 | AverageGap | 0.097 |
-| 8 | TotalItems | 0.042 |
-| 9 | ActiveDays | 0.038 |
-| 10 | Frequency | 0.029 |
-| 11 | TotalSellers | 0.026 |
-| 12 | TotalProducts | 0.020 |
+| 1 | Recency | 0.203 |
+| 2 | Tenure | 0.125 |
+| 3 | ActiveDays | 0.111 |
+| 4 | AverageGap | 0.105 |
+| 5 | Frequency | 0.094 |
+| 6 | AverageInstallments | 0.078 |
+| 7 | Monetary | 0.068 |
+| 8 | TotalItems | 0.066 |
+| 9 | TotalSellers | 0.055 |
+| 10 | AverageOrderValue | 0.051 |
+| 11 | AverageFreight | 0.029 |
+| 12 | TotalProducts | 0.014 |
 
 **Spending Model — Feature importance (mean decrease in impurity):**
 
@@ -628,9 +648,9 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 |---|---|---|
 | Churn source | Online Retail II (UK, 2009–2011) | Olist (Brazil, delivered orders) |
 | Shared population? | No (two datasets) | Yes — repeat customers (≥ 2 orders) |
-| Churn target | no purchase in 90 days (base 43%) | no order within 150 days (base ~96%) |
+| Churn target | no purchase in 90 days (base 43%) | no order within 150 days (base ~96%, balanced for eval) |
 | Split | churn random; spending random | both **out-of-time** |
-| Churn ROC-AUC | 0.7297 | **0.7390** |
+| Churn ROC-AUC | 0.7297 | **0.7445** |
 | Spending R² | 0.0608 | **0.0426** (stricter out-of-time) |
 
 ---
@@ -639,7 +659,7 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 ### Churn Model — Confusion Matrix
 
-Confusion matrix on 1,829 held-out snapshot customers. TN = 6, TP = 1762, FP = 55, FN = 6 — the model captures almost all churners but rarely identifies the few returning customers (rare-event behaviour).
+Confusion matrix on the **class-balanced** held-out snapshot (122 customers). TN = 31, TP = 44, FP = 30, FN = 17 — both classes are well represented. (On the full 1,829-customer imbalanced set the matrix degenerates to `[[6,55],[6,1762]]`, which is why the balanced view is reported.)
 
 ![Confusion Matrix - Customer Churn](outputs/churn_confusion_matrix.png)
 
@@ -647,7 +667,7 @@ Confusion matrix on 1,829 held-out snapshot customers. TN = 6, TP = 1762, FP = 5
 
 ### Churn Model — ROC Curve
 
-The ROC curve plots True Positive Rate against False Positive Rate across thresholds. AUC = 0.7390 indicates the model ranks churners above non-churners substantially better than chance (0.5).
+The ROC curve plots True Positive Rate against False Positive Rate across thresholds. AUC = 0.7046 on the balanced test (0.7445 on the full imbalanced test) indicates the model ranks churners above non-churners substantially better than chance (0.5).
 
 ![ROC Curve - Customer Churn](outputs/churn_roc_curve.png)
 
@@ -655,7 +675,7 @@ The ROC curve plots True Positive Rate against False Positive Rate across thresh
 
 ### Churn Model — Feature Importance
 
-`Recency` (0.173), `Monetary` (0.138) and `AverageOrderValue` (0.125) lead — classic RFM signals dominate dormant-customer prediction, with `AverageFreight` and `Tenure` close behind.
+`Recency` (0.203), `Tenure` (0.125) and `ActiveDays` (0.111) lead — classic RFM/recency signals dominate dormant-customer prediction, with `AverageGap` and `Frequency` close behind.
 
 ![Feature Importance - Customer Churn](outputs/churn_feature_importance.png)
 
@@ -723,7 +743,10 @@ Thresholds are the **33rd and 66th percentiles of the held-out predicted-spendin
 | **Medium** | `t1 < R ≤ t2` | `t2 = 165.09` |
 | **High** | `R > t2` | — |
 
-On this population the churn probability is near-constant (~0.96), so the segment is effectively driven by predicted spending. This is stated rather than hidden.
+On this population the churn base rate is ~96.7%; the churn model is trained on
+a class-balanced sample so its probabilities spread (roughly 0.28–0.81 on the
+sample inputs) rather than clustering near 0.96, and the risk value is driven by
+both churn probability and predicted spending.
 
 ### Interpretation
 
@@ -740,9 +763,9 @@ Illustrative sensitivity examples are in `outputs/customer_risk_value_examples.c
 ### Limitations
 
 > **The Customer Risk Value is a prototype demonstration indicator, not a validated financial estimate.**
-> - The churn target is heavily imbalanced (~96% base rate) and the spending target is **conditional on a subsequent order existing**
+> - The churn target is heavily imbalanced (~96% base rate), corrected by class balancing; the spending target is **conditional on a subsequent order existing**
 > - No causal relationship between churn and revenue loss is established
-> - The churn probability is near-constant on this population, so the combined value is dominated by predicted spending
+> - Churn probabilities are relative risk scores from a balanced-trained model, not calibrated real-world dormancy rates
 > - The combined value should be treated as a relative prioritisation signal only
 
 ---
@@ -831,7 +854,7 @@ pytest tests/test_pipeline.py -v
 
 | Limitation | Description |
 |---|---|
-| **Rare-event churn** | ~96% of repeat customers do not buy within 150 days; minority-class recall is low and accuracy ≈ base rate. AUC is the informative metric |
+| **Rare-event churn** | ~96.7% of repeat customers do not buy within 150 days; corrected by oversampling to 50/50 for training and a class-balanced held-out evaluation. On the full imbalanced set, ROC-AUC (0.7445) is the informative metric, not accuracy |
 | **Conditional spending target** | The spending model predicts the next order's value **conditional on a subsequent order existing** — never-reordering customers are excluded from the regression set |
 | **Weak spending signal** | R² = 0.043 — prior-order history explains only ~4% of held-out variance; predictions are weak signals for individuals |
 | **Olist is not a subscription business** | "Churn" means long-run inactivity after a repeat purchase, not contract cancellation |

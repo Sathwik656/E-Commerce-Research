@@ -164,7 +164,9 @@
   <div class="card disclaimer">
     <strong>Prototype estimate.</strong> Both models are trained on the same unified Olist
     customer population (repeat customers with &ge; 2 delivered orders). The churn target is
-    heavily imbalanced (~96% of repeat customers are dormant within 150 days), and the spending
+    heavily imbalanced (~96% of repeat customers are dormant within 150 days), so the model is
+    trained on a class-balanced sample and its predicted probabilities are relative risk scores,
+    not calibrated real-world churn rates. The spending
     target is conditional on the customer placing a next order. The
     <em>Customer Risk Value</em> (&ldquo;Churn Probability &times; Predicted Next-Order Spending&rdquo;)
     is a <strong>prototype, risk-weighted spending indicator</strong> &mdash; not a validated estimate of

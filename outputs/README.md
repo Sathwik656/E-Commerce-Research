@@ -27,9 +27,9 @@ output here.
 
 | File | Source model | Evaluation data | Description |
 |---|---|---|---|
-| `churn_evaluation_metrics.csv` | Churn (RandomForestClassifier) | 2018-04-01 snapshot (1,829 customers) | Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC, base rate |
-| `churn_classification_report.csv` | Churn | 2018-04-01 snapshot | Per-class precision/recall/F1/support |
-| `churn_confusion_matrix.csv` | Churn | 2018-04-01 snapshot | TN/FP/FN/TP counts |
+| `churn_evaluation_metrics.csv` | Churn (RandomForestClassifier) | 2018-04-01 snapshot, class-balanced (122 customers) | Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC + CV / full-test ROC-AUC |
+| `churn_classification_report.csv` | Churn | 2018-04-01 snapshot, class-balanced | Per-class precision/recall/F1/support |
+| `churn_confusion_matrix.csv` | Churn | 2018-04-01 snapshot, class-balanced | TN/FP/FN/TP counts |
 | `churn_feature_importance.csv` | Churn | Training fit | Mean decrease in impurity per feature |
 | `spending_evaluation_metrics.csv` | Spending (RandomForestRegressor) | Orders after 2018-01-01 (1,820 obs) | MAE, RMSE, R2, Median AE (BRL) |
 | `spending_feature_importance.csv` | Spending | Training fit | Mean decrease in impurity per feature |
@@ -57,9 +57,14 @@ output here.
 - The spending evaluation set contains only orders placed after the split date;
   each observation predicts the spending of the customer's next order,
   **conditional on a subsequent order existing**.
-- Churn is a rare-event target (~96% of repeat customers do not buy within 150
-  days), so accuracy is dominated by the majority class; **ROC-AUC / PR-AUC**
-  are the informative metrics.
+- Churn is a rare-event target (~96.7% of repeat customers do not buy within
+  150 days). To avoid a degenerate majority-class model, the minority class is
+  **randomly oversampled to 50/50 for training** and the held-out snapshot is
+  **class-balanced** (undersample the majority) for the headline metrics, so
+  both classes are visible in the confusion matrix. On the full imbalanced test
+  set the threshold-free **ROC-AUC = 0.7445** is the honest headline.
+- The full imbalanced test set is still scored (`FullTest_ROC_AUC`,
+  `FullTestBaseRate` in `churn_evaluation_metrics.csv`) for transparency.
 - `model_metrics_comparison.png` labels the two panels separately; churn
   classification scores and spending regression errors must not be compared
   as if they measured the same quantity.

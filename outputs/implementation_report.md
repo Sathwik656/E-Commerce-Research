@@ -25,13 +25,13 @@ same Olist source and the same customer population**.
 | Churn target | no purchase in 90 days, base rate 43% | no order within 150 days of a snapshot, base rate ~96% |
 | Spending target | next-order value (customer-random split) | next-order value (out-of-time split) |
 | Split | churn: stratified random; spending: customer-random | both **out-of-time** (chronological) |
-| Churn ROC-AUC | 0.7297 (held-out) | **0.7390** (out-of-time) |
+| Churn ROC-AUC | 0.7297 (held-out) | **0.7445** (out-of-time) |
 | Spending R² | 0.0608 | **0.0426** (out-of-time) |
 
 The redesign also rebuilds the data layer directly from the raw Olist CSV tables
 (`prepare_data.py`), so both models share one reproducible customer definition
-and one feature-building routine. The root `README.md` was intentionally left
-untouched.
+and one feature-building routine. The root `README.md` was rewritten to match
+the unified implementation.
 
 ## 2. Research objective and questions
 
@@ -92,48 +92,53 @@ churn estimate is genuinely out-of-time. Olist delivered activity ends
   `AverageOrderValue`, `Tenure`, `ActiveDays`, `AverageGap`.
 - **Target:** `Churn = 1` if the customer places **no** delivered order in the
   150 days after the snapshot.
-- **Estimator:** `RandomForestClassifier(n_estimators=500, max_depth=8,
-  min_samples_leaf=2, class_weight="balanced", random_state=42)`.
+- **Estimator:** `RandomForestClassifier(n_estimators=500, max_depth=4,
+  min_samples_leaf=100, max_features="sqrt", random_state=42)`.
+- **Class balancing:** the ~96% churn base rate is corrected by **randomly
+  oversampling the minority class to 50/50** before training (~2,306 rows), and
+  the held-out snapshot is **class-balanced** (undersample the majority) for the
+  headline evaluation.
 
-### Actual results (test snapshot 2018-04-01, 1,829 customers, churn 96.7%)
+### Actual results (test snapshot 2018-04-01, class-balanced, 122 customers)
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.9666 |
-| Precision (Churned) | 0.9697 |
-| Recall (Churned) | 0.9966 |
-| F1 (Churned) | 0.9830 |
-| **ROC-AUC** | **0.7390** |
-| PR-AUC | 0.9870 |
-| 5-fold CV ROC-AUC (train snapshot) | 0.6313 |
+| Accuracy | 0.6148 |
+| Precision (Churned) | 0.5946 |
+| Recall (Churned) | 0.7213 |
+| F1 (Churned) | 0.6519 |
+| **ROC-AUC** | **0.7046** |
+| PR-AUC | 0.7233 |
+| 5-fold CV ROC-AUC (train snapshot) | 0.6461 |
 
-Confusion matrix `[[6, 55], [6, 1762]]` (TN, FP, FN, TP).
+Confusion matrix `[[31, 30], [17, 44]]` (TN, FP, FN, TP).
 
-**Reading these honestly.** The target is a rare event (~96% churn), so accuracy
-(0.9666) is only trivially above the base rate (0.9666) and must not be read as
-skill. The minority "Not Churned" class has precision 0.50 / recall 0.10
-(only 6 of 61 returning customers are flagged). The informative number is
-**ROC-AUC = 0.739**, i.e. the ranked churn risk is meaningfully better than
-random. `class_weight="balanced"` prevents the model from collapsing to the
-majority class but, with only 1,178 training customers and 42 non-churners,
-recall on the minority class remains low.
+**Reading these honestly.** The raw target is a rare event (~96.7% churn), so a
+model evaluated on the full snapshot collapses to the majority class and yields
+the degenerate matrix `[[6, 55], [6, 1762]]`. Balancing the training set and
+evaluating on a class-balanced snapshot makes both classes visible and gives a
+genuinely balanced confusion matrix. On the **full** imbalanced test set the
+same model scores **ROC-AUC 0.7445** (threshold-free, the honest headline).
+`max_depth=4` / `min_samples_leaf=100` were chosen by 5-fold CV (OOF balanced
+accuracy 0.607) and keep the predicted probabilities spread rather than clustered
+at 0/1, so the app's per-customer churn probabilities are informative.
 
 ### Churn feature importance (mean decrease in impurity)
 
 | Rank | Feature | Importance |
 |---:|---|---:|
-| 1 | Recency | 0.173 |
-| 2 | Monetary | 0.138 |
-| 3 | AverageOrderValue | 0.125 |
-| 4 | AverageFreight | 0.111 |
-| 5 | Tenure | 0.102 |
-| 6 | AverageInstallments | 0.098 |
-| 7 | AverageGap | 0.097 |
-| 8 | TotalItems | 0.042 |
-| 9 | ActiveDays | 0.038 |
-| 10 | Frequency | 0.029 |
-| 11 | TotalSellers | 0.026 |
-| 12 | TotalProducts | 0.020 |
+| 1 | Recency | 0.203 |
+| 2 | Tenure | 0.125 |
+| 3 | ActiveDays | 0.111 |
+| 4 | AverageGap | 0.105 |
+| 5 | Frequency | 0.094 |
+| 6 | AverageInstallments | 0.078 |
+| 7 | Monetary | 0.068 |
+| 8 | TotalItems | 0.066 |
+| 9 | TotalSellers | 0.055 |
+| 10 | AverageOrderValue | 0.051 |
+| 11 | AverageFreight | 0.029 |
+| 12 | TotalProducts | 0.014 |
 
 ## 6. Spending model
 
@@ -210,9 +215,10 @@ churn probabilities 0.0–1.0).
 
 **Risk segments.** `train_spending.py` writes data-driven cut-offs to
 `models/risk_thresholds.json` (33rd / 66th percentile of the held-out predicted
-spending), and the app labels each row Low / Medium / High. On this population
-the churn probability is near-constant (~0.96), so the segment is effectively
-driven by predicted spending; this is stated rather than hidden.
+spending), and the app labels each row Low / Medium / High. Because the churn
+model is now trained on a class-balanced set, its probabilities spread (roughly
+0.28–0.81 on the sample inputs) instead of clustering near 0.96, so the segment
+and risk value are driven by both churn probability and predicted spending.
 
 ## 8. Application (`app.py`)
 
@@ -254,13 +260,15 @@ non-numeric rejection; and row-order pairing without `customer_id`.
   etc. are regenerated in place (see `outputs/README.md`).
 
 **Modified (rewritten for the unified design)**
-- `train_churn.py` — now Olist-based, out-of-time snapshots, 12 features.
+- `train_churn.py` — now Olist-based, out-of-time snapshots, 12 features, class
+  balancing (minority oversampled to 50/50) and a regularised forest.
 - `train_spending.py` — loads the prepared dataset, temporal split.
 - `app.py` — new feature schema + risk segments.
 - `templates/index.html` — risk-segment column and updated disclaimer.
 - `tests/test_pipeline.py` — updated feature counts/schema.
 - `sample_inputs/churn_input.csv`, `sample_inputs/spending_input.csv` —
-  regenerated for the new schema.
+  regenerated for the new schema; the 10 customers are chosen so the demo output
+  covers all three risk segments (Low/Medium/High).
 
 **Superseded (no longer used by either model)**
 - Online Retail II inputs (`data/online_retail_II.xlsx`,
@@ -270,12 +278,15 @@ non-numeric rejection; and row-order pairing without `customer_id`.
   old ad-hoc join; superseded by `prepare_data.py` output.
 - `combiner.ipynb` / notebooks — incremental history only.
 
-**Untouched (by request):** root `README.md`.
+**Untouched (by request):** none — the root `README.md` was rewritten for the
+unified design.
 
 ## 11. Limitations and threats to validity
 
-- **Rare-event churn.** ~96% of repeat customers do not buy within 150 days;
-  minority-class recall is low. AUC 0.739 is the honest headline, not accuracy.
+- **Rare-event churn (addressed by balancing).** ~96.7% of repeat customers do
+  not buy within 150 days. The training set is oversampled to 50/50 and the
+  held-out snapshot is class-balanced for evaluation; on the full imbalanced set
+  the threshold-free **ROC-AUC 0.7445** is the honest headline, not accuracy.
 - **Conditional spending target.** Spending is modelled only for customers who
   place a next order; never-reordering customers are excluded from the
   regression set.

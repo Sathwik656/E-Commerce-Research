@@ -6,12 +6,16 @@ Features    : RFM + basket / freight / installments / recency / tenure history
               (computed strictly before the snapshot date - no leakage)
 Target      : Churn = 1 if the customer places NO delivered order in the
               150 days after the snapshot date
+Imbalance   : the repeat-cohort snapshot is ~96% "not churned" (Olist is a
+              mostly one-shot marketplace), so the minority class is
+              randomly oversampled to 50/50 for training and the held-out
+              snapshot is class-balanced for the headline evaluation.
 Evaluation  : out-of-time - trained on the 2018-01-01 snapshot, tested on the
               2018-04-01 snapshot (the two snapshots never overlap in time).
 
-Reads data/olist_churn_dataset.csv (built by prepare_data.py), trains a Random
-Forest Classifier with balanced class weights, writes research outputs to
-outputs/, and saves the model + ordered feature names to models/.
+Reads data/olist_churn_dataset.csv (built by prepare_data.py), trains a
+regularised Random Forest Classifier on a balanced training set, writes research
+outputs to outputs/, and saves the model + ordered feature names to models/.
 
 Run:  python prepare_data.py && python train_churn.py
 """
@@ -28,7 +32,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -52,6 +56,19 @@ for _d in (MODEL_DIR, OUT_DIR):
 
 RANDOM_STATE = 42
 N_ESTIMATORS = 500
+# Fixed by 5-fold cross-validation on the training snapshot (balanced accuracy).
+MODEL_PARAMS = dict(
+    n_estimators=N_ESTIMATORS,
+    max_depth=4,
+    min_samples_leaf=100,
+    max_features="sqrt",
+    random_state=RANDOM_STATE,
+    n_jobs=-1,
+)
+
+
+def make_model():
+    return RandomForestClassifier(**MODEL_PARAMS)
 
 
 def load_dataset():
@@ -62,6 +79,45 @@ def load_dataset():
         if part[CHURN_FEATURES].isnull().any().any():
             raise ValueError("Churn feature matrix contains missing values.")
     return train, test
+
+
+def oversample_minority(X, y, random_state=RANDOM_STATE):
+    """Randomly oversample the minority class up to the majority count (50/50)."""
+    X = X.reset_index(drop=True)
+    y = y.reset_index(drop=True)
+    counts = y.value_counts()
+    minority = counts.idxmin()
+    n_majority = int(counts.max())
+    X_min = X[y == minority]
+    y_min = y[y == minority]
+    X_over = X_min.sample(n_majority, replace=True, random_state=random_state)
+    y_over = y_min.sample(n_majority, replace=True, random_state=random_state)
+    X_bal = pd.concat([X, X_over], ignore_index=True)
+    y_bal = pd.concat([y, y_over], ignore_index=True)
+    return X_bal, y_bal
+
+
+def balanced_subset(df, random_state=RANDOM_STATE):
+    """Return a class-balanced copy of df (undersample the majority class)."""
+    pos = df[df["Churn"] == 1]
+    neg = df[df["Churn"] == 0]
+    n = min(len(pos), len(neg))
+    bal = pd.concat(
+        [pos.sample(n, random_state=random_state), neg.sample(n, random_state=random_state)]
+    )
+    return bal.sample(frac=1, random_state=random_state).reset_index(drop=True)
+
+
+def cross_val_auc(X, y, cv=5):
+    """Mean out-of-fold ROC-AUC, oversampling the minority inside each fold."""
+    skf = StratifiedKFold(cv, shuffle=True, random_state=RANDOM_STATE)
+    scores = []
+    for tr_idx, va_idx in skf.split(X, y):
+        Xb, yb = oversample_minority(X.iloc[tr_idx], y.iloc[tr_idx])
+        m = make_model().fit(Xb, yb)
+        proba = m.predict_proba(X.iloc[va_idx])[:, 1]
+        scores.append(roc_auc_score(y.iloc[va_idx], proba))
+    return float(np.mean(scores))
 
 
 def plot_confusion_matrix(cm, path):
@@ -148,23 +204,26 @@ def main():
     )
 
     X_train, y_train = train[CHURN_FEATURES], train["Churn"]
-    X_test, y_test = test[CHURN_FEATURES], test["Churn"]
-
-    model = RandomForestClassifier(
-        n_estimators=N_ESTIMATORS,
-        max_depth=8,
-        min_samples_leaf=2,
-        class_weight="balanced",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
+    X_train_bal, y_train_bal = oversample_minority(X_train, y_train)
+    print(
+        f"Balanced training set: {len(X_train_bal)} rows "
+        f"(churn {y_train_bal.mean() * 100:.1f}%)"
     )
-    model.fit(X_train, y_train)
+
+    test_bal = balanced_subset(test)
+    X_test, y_test = test_bal[CHURN_FEATURES], test_bal["Churn"]
+    print(
+        f"Balanced test set: {len(test_bal)} customers "
+        f"(churn {y_test.mean() * 100:.1f}%)"
+    )
+
+    model = make_model()
+    model.fit(X_train_bal, y_train_bal)
 
     y_pred = model.predict(X_test)
     proba = model.predict_proba(X_test)[:, 1]
 
-    cv = StratifiedKFold(5, shuffle=True, random_state=RANDOM_STATE)
-    cv_auc = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc").mean()
+    cv_auc = cross_val_auc(X_train, y_train)
 
     joblib.dump(model, MODEL_DIR / "churn_model.pkl")
     with open(MODEL_DIR / "churn_features.json", "w", encoding="utf-8") as fh:
@@ -180,16 +239,26 @@ def main():
     }
     cm = confusion_matrix(y_test, y_pred)
 
-    print("\n-- Out-of-time evaluation (2018-04-01 snapshot) --")
+    full_proba = model.predict_proba(test[CHURN_FEATURES])[:, 1]
+    full_auc = roc_auc_score(test["Churn"], full_proba)
+
+    print("\n-- Out-of-time evaluation (2018-04-01 snapshot, class-balanced) --")
     for k, v in metrics.items():
         print(f"{k}: {v:.4f}")
     print(f"5-fold CV ROC-AUC (train snapshot): {cv_auc:.4f}")
-    print(f"Test churn base rate: {y_test.mean():.4f}")
-    print("Confusion matrix:\n", cm)
+    print(f"Balanced test base rate: {y_test.mean():.4f}")
+    print(f"Full (imbalanced) test ROC-AUC / base rate: {full_auc:.4f} / "
+          f"{test['Churn'].mean():.4f}")
+    print("Confusion matrix (balanced test):\n", cm)
 
     pd.DataFrame(
         [{"Metric": k, "Value": round(v, 4)} for k, v in metrics.items()]
-        + [{"Metric": "ChurnBaseRate", "Value": round(float(y_test.mean()), 4)}]
+        + [
+            {"Metric": "CV_ROC_AUC", "Value": round(cv_auc, 4)},
+            {"Metric": "BalancedTestBaseRate", "Value": round(float(y_test.mean()), 4)},
+            {"Metric": "FullTest_ROC_AUC", "Value": round(full_auc, 4)},
+            {"Metric": "FullTestBaseRate", "Value": round(float(test["Churn"].mean()), 4)},
+        ]
     ).to_csv(OUT_DIR / "churn_evaluation_metrics.csv", index=False)
 
     report = classification_report(
