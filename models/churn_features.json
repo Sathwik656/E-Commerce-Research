@@ -7,6 +7,20 @@
     "AverageOrderValue",
     "AverageQuantityPerOrder",
     "UniqueProducts",
-    "ActiveDays"
+    "ActiveDays",
+    "Tenure",
+    "FirstPurchaseDaysAgo",
+    "OrderValueStd",
+    "OrderValueMax",
+    "OrderValueMin",
+    "OrderValueMedian",
+    "OrdersPerActiveDay",
+    "ProductsPerOrder",
+    "SpendPerDay",
+    "CountryCount",
+    "Cancellations",
+    "CancelledValue",
+    "ReturnRatio",
+    "SpendTrend"
   ]
 }

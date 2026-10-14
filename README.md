@@ -1,6 +1,6 @@
 # E-commerce Customer Churn and Spending Prediction using Machine Learning
 
-> **Research Paper Implementation** — Two Random Forest models (a churn classifier and a next-order spending regressor) trained on a **single unified Olist dataset and customer population**, deployed through a Flask web prototype, and combined into a prototype Customer Risk Value indicator.
+> **Research Paper Implementation** — Two Random Forest models (a churn classifier trained on an enriched RFM dataset derived from **Online Retail II**, and a next-order spending regressor trained on **Olist** prior-order history), deployed through a Flask web prototype, and combined into a prototype Customer Risk Value indicator.
 
 ---
 
@@ -36,10 +36,10 @@ This project addresses two key business intelligence challenges in e-commerce th
 
 | Task | Type | Description |
 |---|---|---|
-| **Customer Churn Prediction** | Binary Classification | Predicts whether a repeat customer will go dormant (no order within 150 days of a snapshot) |
+| **Customer Churn Prediction** | Binary Classification | Predicts whether a customer will churn (no purchase in the final 90 days of the observation window) |
 | **Next-Order Spending Prediction** | Regression | Predicts the payment value (BRL) a customer will spend on their next order (conditional on that order existing) |
 
-Both models use the **same Olist source** and the **same customer population** — repeat customers with at least two delivered orders. This is the key change from the earlier two-dataset design (Online Retail II for churn, Olist for spending), which could not describe the same customers.
+The two models are trained on **independent datasets**: the churn classifier on an enriched customer RFM dataset derived from **Online Retail II** (3,370 customers, 22 features), and the spending regressor on **Olist** prior-order history. The Flask prototype aligns each customer's churn probability with a predicted spending figure — via a shared `customer_id` or by row order — to form the combined indicator.
 
 The two model outputs are combined into a prototype **Customer Risk Value** indicator:
 
@@ -49,7 +49,7 @@ Customer Risk Value (BRL) = Churn Probability × Predicted Next-Order Spending
 
 Both models are served through a **Flask web application** that accepts CSV uploads, ranks customers by risk value, and returns a results table plus a summary.
 
-> **Important:** The Customer Risk Value is a **prototype indicator**, not a validated financial estimate. The churn target is heavily imbalanced (~96% of repeat customers are dormant within the horizon) and the spending target is conditional on a subsequent order.
+> **Important:** The Customer Risk Value is a **prototype indicator**, not a validated financial estimate. The churn target is near-balanced (~43% of customers churn) and the spending target is conditional on a subsequent order existing.
 
 ---
 
@@ -57,9 +57,9 @@ Both models are served through a **Flask web application** that accepts CSV uplo
 
 | RQ | Question |
 |---|---|
-| **RQ1** | On a single e-commerce dataset, can a Random Forest distinguish repeat customers who will go dormant from those who keep buying? |
+| **RQ1** | On a customer churn dataset, can a Random Forest distinguish customers who churn from those who stay active? |
 | **RQ2** | Can a Random Forest predict the payment value of a customer's next order from prior-order history alone, without target leakage? |
-| **RQ3** | Can the two unified outputs be combined into a transparent, clearly-bounded risk indicator for demonstration purposes? |
+| **RQ3** | Can the two model outputs be combined into a transparent, clearly-bounded risk indicator for demonstration purposes? |
 
 ---
 
@@ -67,50 +67,67 @@ Both models are served through a **Flask web application** that accepts CSV uplo
 
 ### Approach Summary
 
-The project follows a standard supervised machine learning pipeline applied to a **single unified Olist dataset**:
+Each model follows a standard supervised machine learning pipeline on its own source data:
 
 ```
-Raw Olist tables → Join & Clean → Feature Engineering → Out-of-time Split → Model Training → Evaluation → Serialization → Flask Deployment
+RAW DATA (Online Retail II · Olist) → Clean & Aggregate → Feature Engineering → Split → Model Training → Evaluation → Serialization → Flask Deployment
 ```
 
 ### Methodology Steps
 
 | Step | Churn Model | Spending Model |
 |---|---|---|
-| **1. Data Source** | Olist Brazilian E-Commerce (delivered orders) | Olist Brazilian E-Commerce (delivered orders) |
-| **2. Population** | Repeat customers (≥ 2 delivered orders) at a snapshot | Repeat-customer order events (orders with prior history) |
-| **3. Cleaning** | Keep `delivered` + `payment_value > 0`; aggregate payments/items per order | Same shared cleaning (`prepare_data.py`) |
-| **4. Features** | 12 RFM + basket/freight/installments/recency/tenure features (pre-snapshot) | 9 prior-order cumulative features |
-| **5. Target** | Churn = 1 if no order within 150 days after the snapshot | NextOrderSpending = payment value of the next order (conditional on it existing) |
-| **6. Split** | Out-of-time: train on 2018-01-01 snapshot, test on 2018-04-01 snapshot | Out-of-time: orders before vs after 2018-01-01 |
-| **7. Model** | RandomForestClassifier (500 trees, balanced) | RandomForestRegressor (300 trees) |
+| **1. Data Source** | Online Retail II (UCI 502) → `customer_churn_dataset_enriched.csv` | Olist Brazilian E-Commerce (delivered orders) |
+| **2. Population** | 3,370 customers with purchase history | Repeat-customer order events (orders with prior history) |
+| **3. Cleaning** | Customer RFM aggregation built in `notebooks/model1.ipynb` | Shared cleaning in `prepare_data.py` |
+| **4. Features** | 22 enriched RFM + temporal/behavioural features | 9 prior-order cumulative features |
+| **5. Target** | Churn = 1 if no purchase in the final 90 days | NextOrderSpending = payment value of the next order (conditional on it existing) |
+| **6. Split** | Stratified 80/20 train/test (2,696 / 674) | Out-of-time: orders before vs after 2018-01-01 |
+| **7. Model** | RandomForestClassifier (600 trees) | RandomForestRegressor (300 trees) |
 | **8. Evaluation** | Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC | MAE, RMSE, R², Median AE |
 | **9. Serialization** | `churn_model.pkl` + `churn_features.json` | `spending_model.pkl` + `spending_features.json` |
 
-Both models share the data layer produced by `prepare_data.py`.
+The spending model consumes the data layer produced by `prepare_data.py`; the churn model consumes the committed enriched churn dataset (produced by the legacy notebook).
 
 ---
 
 ## 4. Dataset
 
+Two source datasets are used — one per model.
+
 | Dataset | Source | Role | Size |
 |---|---|---|---|
-| **Olist Brazilian E-Commerce** | [Kaggle `olistbr/brazilian-ecommerce`](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) | BOTH churn and spending models | 99,441 marketplace orders; raw tables in `olist_complete_dataset/` |
+| **Online Retail II** | [UCI ML Repository, ID 502](https://archive.ics.uci.edu/dataset/502/online%2Bretail%2Bii) | **Churn model only** | 3,370 customers; raw workbook `data/online_retail_II.xlsx` |
+| **Olist Brazilian E-Commerce** | [Kaggle `olistbr/brazilian-ecommerce`](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) | **Spending model only** | 99,441 marketplace orders; raw tables in `olist_complete_dataset/` |
 
-### Dataset Details
+### Churn Dataset Details (Online Retail II)
+
+- UK online-retail transactions, 2009–2011 (last invoice 2011-12-09); raw workbook `data/online_retail_II.xlsx`.
+- `notebooks/model1.ipynb` cleans it into `data/customer_churn_dataset.csv` (9 RFM features), then enriches it into **`data/customer_churn_dataset_enriched.csv`** (22 features) — the file `train_churn.py` reads.
+- **3,370 customers**, 22 features + `Churn` target; class balance **57.0% not churned / 43.0% churned**.
+
+### Spending Dataset Details (Olist)
 
 - Raw tables used by the pipeline: `olist_orders_dataset.csv`, `olist_customers_dataset.csv`, `olist_order_payments_dataset.csv`, `olist_order_items_dataset.csv`.
 - The raw tables are joined directly in `prepare_data.py` (no intermediate notebook) into `data/olist_orders_joined.csv`.
 - Only **delivered** orders with `payment_value > 0` are kept (96,477 orders, 93,357 customers).
-- **Repeat customers (≥ 2 delivered orders): 2,801 (≈ 3.0%)** — this is the shared modelling population.
+- **Repeat customers (≥ 2 delivered orders): 2,801 (≈ 3.0%)** — this is the spending modelling population.
 
-> The earlier Online Retail II workbook (UK) is **no longer used** by either model. Its files remain in `data/` for provenance only (see [Project Structure](#10-project-structure)).
+> `prepare_data.py` also emits `data/olist_churn_dataset.csv` (the earlier Olist churn snapshot), but the current churn model does **not** use it.
 
 ---
 
 ## 5. Data Cleaning and Preprocessing
 
-### Shared Cleaning (`prepare_data.py`)
+### Churn Data (`notebooks/model1.ipynb`)
+
+1. Load the raw Online Retail II workbook and parse `InvoiceDate`.
+2. Drop rows without `Customer ID`; treat negative-`Quantity` invoices as cancellations.
+3. Aggregate each customer into RFM + behavioural features (see [Feature Engineering](#6-feature-engineering)).
+4. Set `observation_end = max(InvoiceDate) - 90 days`; the target window is the final 90 days.
+5. `Churn = 1` if the customer has **no purchase** in that window, else `0`.
+
+### Shared Cleaning for Spending (`prepare_data.py`)
 
 1. Parse `order_purchase_timestamp` to datetime.
 2. Aggregate **payments per order**: `payment_value = sum`, `payment_installments = max` (prevents double-counting multi-row payments).
@@ -120,44 +137,47 @@ Both models share the data layer produced by `prepare_data.py`.
 6. Drop rows missing `customer_unique_id`, `order_purchase_timestamp`, or `payment_value`; keep `payment_value > 0`.
 7. Sort by (`customer_unique_id`, `order_purchase_timestamp`) for chronological ordering.
 
-### Churn Snapshot Construction
-
-For a snapshot date `T` (2018-01-01 for train, 2018-04-01 for test):
-- Features are computed from orders **strictly before `T`**.
-- The target uses orders in the window **[`T`, `T` + 150 days)**.
-- Repeat cohort filter: keep customers with ≥ 2 orders before `T`.
-
 ### Spending Target Construction
 
 - Sort each customer's orders chronologically.
 - All features are cumulative sums of **prior orders only** (first order dropped — no history).
-- `NextOrderSpending` = the **next** order's `payment_value` (BRL).
+- `NextOrderSpending` = the **next** order's `payment_value` (BRL), conditional on that order existing.
 
 ---
 
 ## 6. Feature Engineering
 
-### Churn Features — 12 Customer-Level Features
+### Churn Features — 22 Customer-Level Features
 
 | Feature | Description |
 |---|---|
-| `Recency` | Days from the customer's last pre-snapshot order to the snapshot |
-| `Frequency` | Number of delivered orders before the snapshot |
-| `Monetary` | Total spend before the snapshot (BRL) |
-| `TotalItems` | Total items across prior orders |
-| `TotalProducts` | Total distinct products across prior orders |
-| `TotalSellers` | Total distinct sellers across prior orders |
-| `AverageFreight` | Mean freight value per order |
-| `AverageInstallments` | Mean payment installments per order |
+| `Recency` | Days from the customer's last purchase to the observation end |
+| `Frequency` | Number of orders (invoices) |
+| `Monetary` | Total spend |
+| `TotalQuantity` | Total units purchased |
 | `AverageOrderValue` | Monetary ÷ Frequency |
-| `Tenure` | Days between first and last pre-snapshot order |
-| `ActiveDays` | Number of distinct calendar days with orders |
-| `AverageGap` | Tenure ÷ (Frequency − 1) — average days between orders |
+| `AverageQuantityPerOrder` | Units per order (TotalQuantity ÷ Frequency) |
+| `UniqueProducts` | Distinct products purchased |
+| `ActiveDays` | Distinct days on which the customer ordered |
+| `Tenure` | Days between first and last purchase |
+| `FirstPurchaseDaysAgo` | Days from the first purchase to the observation end |
+| `OrderValueStd` | Standard deviation of per-order value |
+| `OrderValueMax` | Largest single-order value |
+| `OrderValueMin` | Smallest single-order value |
+| `OrderValueMedian` | Median single-order value |
+| `OrdersPerActiveDay` | Frequency ÷ ActiveDays |
+| `ProductsPerOrder` | UniqueProducts ÷ Frequency |
+| `SpendPerDay` | Monetary ÷ Tenure |
+| `CountryCount` | Distinct billing countries |
+| `Cancellations` | Number of cancelled invoices |
+| `CancelledValue` | Total value of cancelled invoices |
+| `ReturnRatio` | CancelledValue ÷ (Monetary + CancelledValue) |
+| `SpendTrend` | Trend in per-order value across the customer's order history |
 
 **Churn Target Definition:**
-- `Churn = 1` if the customer places **no** delivered order in the 150 days after the snapshot
+- `Churn = 1` if the customer has **no purchase in the final 90 days** of the observation window
 - `Churn = 0` otherwise
-- **Train snapshot churn rate: 95.8% (1,178 customers); Test snapshot churn rate: 96.7% (1,829 customers)**
+- **Base rate: 43.0% churned (1,449 / 3,370 customers)** — near-balanced, so no class weighting or resampling is used
 
 ### Spending Features — 9 Cumulative Historical Features
 
@@ -180,7 +200,9 @@ For each order, features are **cumulative sums of all previous orders only** (st
 - Only orders with prior history are included (first order per customer dropped)
 - **Leakage control**: target-order quantity, price, freight, and payment fields are never used as features
 
-**Resulting Datasets (`outputs/dataset_summary.csv`):**
+**Churn Dataset:** 3,370 customers × 22 features; target base rate 43.0% churned (1,449 customers).
+
+**Resulting Spending Dataset (`outputs/dataset_summary.csv`):**
 
 | Item | Value |
 |---|---:|
@@ -203,21 +225,21 @@ For each order, features are **cumulative sums of all previous orders only** (st
 
 | Hyperparameter | Value | Rationale |
 |---|---|---|
-| `n_estimators` | 500 | Larger forest for variance reduction |
-| `max_depth` | 4 | Regularised, shallow trees; spreads predicted probabilities |
-| `min_samples_leaf` | 100 | Strong regularisation so leaves are not dominated by noise |
-| `max_features` | `sqrt` | Standard RF split rule |
+| `n_estimators` | 600 | Larger forest for variance reduction |
+| `max_depth` | None | Fully grown trees; the enriched features support them |
+| `min_samples_leaf` | 1 | Validated: does not overfit the 2,696-sample training set |
+| `min_samples_split` | 2 | Default split rule |
+| `max_features` | `sqrt` | Standard RF split rule (~√22 features per split) |
+| `class_weight` | None | Target is near-balanced (~43% churn) |
 | `random_state` | 42 | Reproducibility |
 | `n_jobs` | -1 | Parallel training on all CPU cores |
 
-**Class balancing:** the repeat-cohort snapshot is ~96% "not churned", so the
-minority class is **randomly oversampled to 50/50** before training, and the
-held-out snapshot is **class-balanced** (undersample the majority) for the
-headline evaluation. Hyperparameters were chosen by 5-fold cross-validation on
-the training snapshot (maximising balanced accuracy).
+**Split:** **stratified 80/20 random split** — 2,696 train / 674 test customers
+(test churn rate 43.0%). **No class balancing** is applied because the target is
+already near-balanced.
 
-**Cross-Validation:** 5-fold Stratified K-Fold on the training snapshot, with
-the minority oversampled inside each fold.
+**Cross-Validation:** 5-fold Stratified K-Fold on the training split
+(ROC-AUC = 0.7376 ± 0.0130).
 
 ### Model 2 — Random Forest Regressor (Spending Prediction)
 
@@ -264,63 +286,62 @@ Flask>=3.0
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    UNIFIED OLIST ML PIPELINE                            │
+│                    MACHINE LEARNING PIPELINE (two models)                │
 └─────────────────────────────────────────────────────────────────────────┘
 
-  RAW OLIST TABLES (olist_complete_dataset/)
-  ┌──────────────────────────────┐
-  │  orders · customers ·        │
-  │  order_payments · items      │
-  └──────────────┬───────────────┘
-                 │  prepare_data.py  (join + clean, no double counting)
-                 ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │  SHARED DELIVERED-ORDER TABLE  →  data/olist_orders_joined.csv │
-  └───────────────┬──────────────────────────┬───────────────┘
-                  │                          │
-                  ▼                          ▼
-  ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  CHURN DATASET           │   │  SPENDING DATASET        │
-  │  repeat customers        │   │  prior-order events      │
-  │  12 snapshot features    │   │  9 cumulative features   │
-  │  Churn target (150 d)    │   │  NextOrderSpending target│
-  └──────────┬───────────────┘   └──────────┬───────────────┘
-             │                              │
-             ▼                              ▼
-  ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  SPLIT (out-of-time)     │   │  SPLIT (out-of-time)     │
-  │  2018-01-01 / 2018-04-01 │   │  before / after 2018-01  │
-  │  1178 train / 1829 test  │   │  1300 / 1820 observations│
-  └──────────┬───────────────┘   └──────────┬───────────────┘
-             │                              │
-             ▼                              ▼
-  ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  RandomForest Classifier │   │  RandomForest Regressor  │
-  │  500 trees, depth=4      │   │  300 trees               │
-  └──────────┬───────────────┘   └──────────┬───────────────┘
-             │                              │
-             ▼                              ▼
-  ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  ROC-AUC: 0.7445         │   │  MAE: 93.90 BRL          │
-  │  PR-AUC:  0.7233 (bal.)  │   │  RMSE: 150.16 BRL        │
-  │  Acc:     0.6148 (bal.)  │   │  R²:   0.0426            │
-  └──────────┬───────────────┘   └──────────┬───────────────┘
-             │                              │
-             ▼                              ▼
-  ┌──────────────────────────┐   ┌──────────────────────────┐
-  │  churn_model.pkl         │   │  spending_model.pkl      │
-  │  churn_features.json     │   │  spending_features.json  │
-  └──────────┬───────────────┘   └──────────┬───────────────┘
-             └──────────────┬───────────────┘
-                            ▼
-              ┌─────────────────────────────┐
-              │   FLASK APPLICATION         │
-              │   app.py                    │
-              │   • Churn CSV (12 cols)     │
-              │   • Spend CSV (9 cols)      │
-              │   • Risk value + segments   │
-              │   • Ranked table + summary  │
-              └─────────────────────────────┘
+  CHURN PATH                                 SPENDING PATH
+
+  ┌───────────────────────────┐              ┌───────────────────────────┐
+  │ Online Retail II workbook │              │ RAW OLIST TABLES          │
+  │ data/online_retail_II.xlsx│              │ (olist_complete_dataset/) │
+  └────────────┬──────────────┘              └────────────┬──────────────┘
+               │ notebooks/model1.ipynb                   │ prepare_data.py
+               ▼                                         ▼
+  ┌───────────────────────────┐              ┌───────────────────────────┐
+  │ CHURN DATASET             │              │ DELIVERED-ORDER TABLE     │
+  │ customer_churn_dataset_   │              │ data/olist_orders_joined  │
+  │   enriched.csv            │              └────────────┬──────────────┘
+  │ 22 enriched features      │                           ▼
+  │ Churn target (90 days)    │              ┌───────────────────────────┐
+  └────────────┬──────────────┘              │ SPENDING DATASET          │
+               │                             │ 9 cumulative features     │
+               ▼                             │ NextOrderSpending target  │
+  ┌───────────────────────────┐              └────────────┬──────────────┘
+  │ SPLIT  stratified 80/20   │                           │
+  │ 2696 train / 674 test     │                           ▼
+  └────────────┬──────────────┘              ┌───────────────────────────┐
+               │                             │ SPLIT  out-of-time        │
+               ▼                             │ 1300 / 1820 observations  │
+  ┌───────────────────────────┐              └────────────┬──────────────┘
+  │ RandomForest Classifier   │                           │
+  │ 600 trees, fully grown    │                           ▼
+  └────────────┬──────────────┘              ┌───────────────────────────┐
+               │                             │ RandomForest Regressor    │
+               ▼                             │ 300 trees                 │
+  ┌───────────────────────────┐              └────────────┬──────────────┘
+  │ Acc:      0.6588          │                           │
+  │ ROC-AUC:  0.7153          │                           ▼
+  │ CV ROC-AUC: 0.7376        │              ┌───────────────────────────┐
+  └────────────┬──────────────┘              │ MAE:  93.90 BRL           │
+               │                             │ RMSE: 150.16 BRL          │
+               ▼                             │ R²:   0.0426              │
+  ┌───────────────────────────┐              └────────────┬──────────────┘
+  │ churn_model.pkl           │                           │
+  │ churn_features.json       │                           ▼
+  └────────────┬──────────────┘              ┌───────────────────────────┐
+               │                             │ spending_model.pkl        │
+               │                             │ spending_features.json    │
+               │                             └────────────┬──────────────┘
+               └──────────────────┬───────────────────────┘
+                                  ▼
+                ┌──────────────────────────────────┐
+                │   FLASK APPLICATION              │
+                │   app.py                         │
+                │   • Churn CSV (22 cols)          │
+                │   • Spend CSV (9 cols)           │
+                │   • Risk value + segments        │
+                │   • Ranked table + summary       │
+                └──────────────────────────────────┘
 ```
 
 ---
@@ -329,7 +350,7 @@ Flask>=3.0
 
 ```text
 Research_Paper/
-├── prepare_data.py                 Unified Olist prep (join → clean → datasets)
+├── prepare_data.py                 Olist spending prep (join → clean → datasets)
 ├── train_churn.py                  Train churn model, metrics, and figures
 ├── train_spending.py               Train spending model, metrics, and figures
 ├── app.py                          Flask application (churn + spending + risk value)
@@ -337,13 +358,13 @@ Research_Paper/
 │
 ├── data/
 │   ├── olist_orders_joined.csv     Joined delivered orders (generated)
-│   ├── olist_churn_dataset.csv     Churn snapshot dataset (generated)
+│   ├── olist_churn_dataset.csv     [unused] earlier Olist churn snapshot
 │   ├── olist_spending_dataset_prepared.csv  Next-order event dataset (generated)
-│   ├── online_retail_II.xlsx       [legacy] old churn source (unused)
-│   ├── online_retail_II_cleaned.csv[legacy] (unused)
-│   ├── customer_churn_dataset.csv  [legacy] (unused)
-│   ├── customer_churn_dataset_     [legacy] (unused)
-│   │   enriched.csv
+│   ├── online_retail_II.xlsx       Raw churn source (Online Retail II)
+│   ├── online_retail_II_cleaned.csv Cleaned source (notebook output)
+│   ├── customer_churn_dataset.csv  Churn base dataset, 9 RFM features (notebook)
+│   ├── customer_churn_dataset_     Churn model input, 22 features
+│   │   enriched.csv                (notebook output; used by train_churn.py)
 │   ├── ecommerce_customers.csv     [legacy] supplemental reference
 │   ├── olist_spending_dataset.csv  [legacy] old ad-hoc join (unused)
 │   └── olist_spending_cleaned.csv  [legacy] (unused)
@@ -369,6 +390,7 @@ Research_Paper/
 │   ├── churn_classification_report.csv
 │   ├── churn_confusion_matrix.csv
 │   ├── churn_feature_importance.csv
+│   ├── churn_predictions.csv
 │   ├── spending_evaluation_metrics.csv
 │   ├── spending_feature_importance.csv
 │   ├── spending_predictions.csv
@@ -378,28 +400,28 @@ Research_Paper/
 │   ├── churn_confusion_matrix.png
 │   ├── churn_feature_importance.png
 │   ├── churn_roc_curve.png
+│   ├── churn_precision_recall_curve.png
+│   ├── churn_metrics_dashboard.png
+│   ├── churn_cv_scores.png
 │   ├── spending_feature_importance.png
 │   ├── spending_actual_vs_predicted.png
 │   ├── spending_residuals.png
-│   ├── spending_target_distribution.png
-│   └── model_metrics_comparison.png
+│   └── spending_target_distribution.png
 │
 ├── templates/
 │   └── index.html                  Flask UI (two uploads + ranked results + summary)
 │
 ├── sample_inputs/
-│   ├── churn_input.csv             10 example churn rows (12 features + customer_id)
+│   ├── churn_input.csv             10 example churn rows (22 features + customer_id)
 │   └── spending_input.csv          10 example spending rows (9 features + customer_id)
 │
 ├── docs/
 │   ├── Info.md                     [legacy] project notes
 │   └── sample_report.pdf           [legacy] sample report reference
 │
-├── notebooks/                      [legacy] incremental implementation records
-│   ├── model1.ipynb
-│   └── model2.ipynb
-│
-├── combiner.ipynb                  [legacy] old Olist join (superseded by prepare_data.py)
+├── notebooks/
+│   ├── model1.ipynb                Builds the churn dataset (Online Retail II)
+│   └── model2.ipynb                [legacy] early spending experiments
 │
 └── tests/
     └── test_pipeline.py            Automated pipeline tests (11 tests)
@@ -432,11 +454,11 @@ pip install -r requirements.txt
 All scripts use `random_state=42` and write results to `outputs/`.
 
 ```bash
-# Step 1: Build the shared datasets from the raw Olist tables
+# Step 1: Build the Olist spending datasets from the raw Olist tables
 # Reads:  olist_complete_dataset/*.csv
 # Writes: data/olist_orders_joined.csv
-#         data/olist_churn_dataset.csv
 #         data/olist_spending_dataset_prepared.csv
+#         data/olist_churn_dataset.csv  (legacy, unused by train_churn.py)
 python prepare_data.py
 
 # Step 2: Train the spending model
@@ -447,13 +469,14 @@ python prepare_data.py
 python train_spending.py
 
 # Step 3: Train the churn model
-# Reads:  data/olist_churn_dataset.csv
+# Reads:  data/customer_churn_dataset_enriched.csv
+#         (pre-built by notebooks/model1.ipynb from data/online_retail_II.xlsx)
 # Writes: models/churn_model.pkl, models/churn_features.json,
-#         outputs/churn_*.{csv,png}, outputs/model_metrics_comparison.png
+#         outputs/churn_*.{csv,png}
 python train_churn.py
 ```
 
-> Run `train_spending.py` before `train_churn.py` so `model_metrics_comparison.png` uses fresh spending metrics. All scripts are deterministic — reruns reproduce the reported metrics.
+> All scripts are deterministic (`random_state=42`) — reruns reproduce the reported metrics.
 
 ---
 
@@ -467,7 +490,7 @@ python app.py               # Starts at http://127.0.0.1:5000
 
 1. Navigate to `http://127.0.0.1:5000`
 2. Upload two CSV files:
-   - **Churn Feature CSV** — 12 historical/behavioural columns (+ optional `customer_id`)
+   - **Churn Feature CSV** — 22 RFM/behavioural columns (+ optional `customer_id`)
    - **Spending Feature CSV** — 9 prior-order columns (+ optional `customer_id`)
 3. Click **Predict and rank by risk value**
 4. View the results:
@@ -480,21 +503,22 @@ python app.py               # Starts at http://127.0.0.1:5000
 Use the provided samples in `sample_inputs/` (10 customers each, aligned by `customer_id`):
 
 ```bash
-# Churn input: 12 feature columns + optional customer_id
+# Churn input: 22 feature columns + optional customer_id
 sample_inputs/churn_input.csv
 
 # Spending input: 9 feature columns + optional customer_id
 sample_inputs/spending_input.csv
 ```
 
-The 10 sample customers are chosen so the demo output exercises **all three risk
-segments** — Low, Medium and High (4 / 3 / 3).
+Both sample files use the same identifiers (`C001`–`C010`), so the demo joins them on `customer_id`. With the current models these 10 customers fall into the **Low** (6) and **High** (4) risk segments.
 
-**Churn CSV required columns (12):**
+**Churn CSV required columns (22):**
 ```
-Recency, Frequency, Monetary, TotalItems, TotalProducts, TotalSellers,
-AverageFreight, AverageInstallments, AverageOrderValue, Tenure,
-ActiveDays, AverageGap
+Recency, Frequency, Monetary, TotalQuantity, AverageOrderValue,
+AverageQuantityPerOrder, UniqueProducts, ActiveDays, Tenure,
+FirstPurchaseDaysAgo, OrderValueStd, OrderValueMax, OrderValueMin,
+OrderValueMedian, OrdersPerActiveDay, ProductsPerOrder, SpendPerDay,
+CountryCount, Cancellations, CancelledValue, ReturnRatio, SpendTrend
 ```
 
 **Spending CSV required columns (9):**
@@ -528,20 +552,21 @@ Returns **HTTP 400** with a descriptive error message per file.
 
 ### Model 1: Churn Classifier — What It Evaluates
 
-The churn model evaluates **binary classification** out-of-time on the 2018-04-01
-snapshot. Because the raw snapshot is ~96.7% churn (1,829 customers), headline
-metrics use a **class-balanced** version of it (122 customers, 50% base rate),
-and the full imbalanced set is also scored for the threshold-free ROC-AUC:
+The churn model evaluates **binary classification** on a stratified 80/20
+held-out test set (674 customers, 43.0% churn). Because the target is
+near-balanced, every metric below is computed on the natural test distribution —
+no oversampling, undersampling or class weighting is applied:
 
 | Metric | Formula | What It Tells You |
 |---|---|---|
-| **Accuracy** | Correct predictions ÷ Total | Overall proportion correct — **misleading here** (≈ base rate) |
+| **Accuracy** | Correct predictions ÷ Total | Overall proportion correct (on a near-balanced target this is meaningful) |
 | **Precision** | TP ÷ (TP + FP) | Of customers predicted as churners, how many actually churned |
 | **Recall** | TP ÷ (TP + FN) | Of actual churners, how many were correctly identified |
 | **F1-Score** | 2 × (Precision × Recall) ÷ (Precision + Recall) | Harmonic mean of Precision and Recall |
 | **ROC-AUC** | Area under the ROC curve | Ability to rank churners above non-churners (0.5 = random) |
-| **PR-AUC** | Area under Precision–Recall curve | More informative than ROC-AUC for rare-event targets |
+| **PR-AUC** | Area under Precision–Recall curve | Precision/recall balance; baseline equals the 43% churn rate |
 | **Confusion Matrix** | TN, FP, FN, TP counts | Per-class error breakdown |
+| **CV ROC-AUC** | 5-fold Stratified K-Fold on train | Generalisation estimate that never touches the test set |
 
 ### Model 2: Spending Regressor — What It Evaluates
 
@@ -558,33 +583,37 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 ## 15. Outputs and Results
 
-### Churn Model Results (out-of-time: 2018-04-01 snapshot)
-
-**Headline — class-balanced evaluation (122 customers, base rate 50%):**
+### Churn Model Results (held-out test: 674 customers, 43.0% churn)
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.6148 |
-| Precision (Churned) | 0.5946 |
-| Recall (Churned) | 0.7213 |
-| F1-Score (Churned) | 0.6519 |
-| **ROC-AUC** | **0.7046** |
-| PR-AUC | 0.7233 |
-| 5-fold CV ROC-AUC (train snapshot) | 0.6461 |
+| Accuracy | **0.6588** |
+| Precision (Churned) | 0.6042 |
+| Recall (Churned) | 0.6000 |
+| F1-Score (Churned) | 0.6021 |
+| **ROC-AUC** | **0.7153** |
+| PR-AUC | 0.6189 |
+| 5-fold CV ROC-AUC (train) | 0.7376 ± 0.0130 |
 
-**Confusion Matrix (class-balanced test):**
+**Confusion Matrix (held-out test):**
 
 |  | Predicted: Not Churned | Predicted: Churned |
 |---|---:|---:|
-| **Actual: Not Churned** | 31 (TN) | 30 (FP) |
-| **Actual: Churned** | 17 (FN) | 44 (TP) |
+| **Actual: Not Churned** | 270 (TN) | 114 (FP) |
+| **Actual: Churned** | 116 (FN) | 174 (TP) |
 
-> The raw snapshot is ~96.7% churn, so the minority class is oversampled to
-> 50/50 for training and the held-out snapshot is balanced for the headline
-> metrics — this makes both classes visible instead of the degenerate
-> `[[6,55],[6,1762]]` matrix. On the **full** imbalanced test set (1,829
-> customers, base rate 96.7%) the same model scores **ROC-AUC 0.7445**, the
-> honest threshold-free headline. Accuracy on a 96.7%-churn set is not skill.
+**Per-class report:**
+
+| Class | Precision | Recall | F1-score | Support |
+|---|---:|---:|---:|---:|
+| Not Churned | 0.6995 | 0.7031 | 0.7013 | 384 |
+| Churned | 0.6042 | 0.6000 | 0.6021 | 290 |
+
+> Accuracy 0.659 beats the majority-class baseline (0.570) by ~9 points, and
+> ROC-AUC 0.715 / PR-AUC 0.619 (vs. 0.43 baseline) indicate a **modest but real**
+> signal. The 5-fold CV ROC-AUC (0.738 ± 0.013) is the more trustworthy
+> generalisation estimate; the target is near-balanced, so no resampling was
+> used and these numbers are directly comparable to the natural class mix.
 
 ### Spending Model Results (out-of-time: 1,820 orders after 2018-01-01)
 
@@ -613,18 +642,32 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 | Rank | Feature | Importance |
 |---:|---|---:|
-| 1 | Recency | 0.203 |
-| 2 | Tenure | 0.125 |
-| 3 | ActiveDays | 0.111 |
-| 4 | AverageGap | 0.105 |
-| 5 | Frequency | 0.094 |
-| 6 | AverageInstallments | 0.078 |
-| 7 | Monetary | 0.068 |
-| 8 | TotalItems | 0.066 |
-| 9 | TotalSellers | 0.055 |
-| 10 | AverageOrderValue | 0.051 |
-| 11 | AverageFreight | 0.029 |
-| 12 | TotalProducts | 0.014 |
+| 1 | TotalQuantity | 0.076 |
+| 2 | Monetary | 0.073 |
+| 3 | Recency | 0.070 |
+| 4 | SpendTrend | 0.066 |
+| 5 | FirstPurchaseDaysAgo | 0.060 |
+| 6 | UniqueProducts | 0.059 |
+| 7 | AverageQuantityPerOrder | 0.058 |
+| 8 | SpendPerDay | 0.056 |
+| 9 | OrderValueMin | 0.053 |
+| 10 | ProductsPerOrder | 0.052 |
+| 11 | AverageOrderValue | 0.049 |
+| 12 | OrderValueMedian | 0.049 |
+| 13 | OrderValueMax | 0.049 |
+| 14 | Tenure | 0.043 |
+| 15 | ActiveDays | 0.038 |
+| 16 | Frequency | 0.035 |
+| 17 | OrderValueStd | 0.033 |
+| 18 | CancelledValue | 0.031 |
+| 19 | ReturnRatio | 0.024 |
+| 20 | Cancellations | 0.022 |
+| 21 | OrdersPerActiveDay | 0.004 |
+| 22 | CountryCount | 0.000 |
+
+Importance is spread almost evenly (no feature above 0.08), which is consistent
+with the modest single-feature AUCs — a weak-signal problem rather than one
+dominant predictor.
 
 **Spending Model — Feature importance (mean decrease in impurity):**
 
@@ -642,16 +685,27 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 > Feature importance reflects **predictive contribution within the fitted forest**, not causation.
 
-### Old vs New Methodology
+### Earlier 8-feature vs Current 22-feature Churn Model
 
-| Aspect | Old methodology | New (unified) methodology |
+| Aspect | Earlier churn model | Current churn model |
 |---|---|---|
-| Churn source | Online Retail II (UK, 2009–2011) | Olist (Brazil, delivered orders) |
-| Shared population? | No (two datasets) | Yes — repeat customers (≥ 2 orders) |
-| Churn target | no purchase in 90 days (base 43%) | no order within 150 days (base ~96%, balanced for eval) |
-| Split | churn random; spending random | both **out-of-time** |
-| Churn ROC-AUC | 0.7297 | **0.7445** |
-| Spending R² | 0.0608 | **0.0426** (stricter out-of-time) |
+| Features | 8 RFM-style | 22 enriched RFM + behavioural |
+| Model | RandomForestClassifier, `max_depth=6`, `class_weight="balanced"` | RandomForestClassifier, 600 trees, fully grown |
+| Split | stratified 80/20 | stratified 80/20 |
+| Accuracy | 0.6291 | **0.6588** |
+| Precision (Churned) | 0.5498 | **0.6042** |
+| Recall (Churned) | **0.7621** | 0.6000 |
+| F1-Score (Churned) | **0.6387** | 0.6021 |
+| ROC-AUC | 0.7107 | **0.7153** |
+| PR-AUC | 0.6104 | **0.6189** |
+| CV ROC-AUC | **0.7505** | 0.7376 |
+
+> The 22-feature enriched model improves accuracy, precision, ROC-AUC and PR-AUC.
+> It trades away some recall and F1 versus the earlier balanced 8-feature model,
+> so the two are not strictly ordered — the enriched model is preferred for its
+> higher accuracy and precision at a similar ROC-AUC. The spending model is
+> unchanged (RandomForestRegressor on Olist prior-order history; R² = 0.0426
+> out-of-time).
 
 ---
 
@@ -659,7 +713,7 @@ The spending model evaluates **regression performance** on 1,820 held-out observ
 
 ### Churn Model — Confusion Matrix
 
-Confusion matrix on the **class-balanced** held-out snapshot (122 customers). TN = 31, TP = 44, FP = 30, FN = 17 — both classes are well represented. (On the full 1,829-customer imbalanced set the matrix degenerates to `[[6,55],[6,1762]]`, which is why the balanced view is reported.)
+Confusion matrix on the held-out test set (674 customers, 43.0% churn). TN = 270, FP = 114, FN = 116, TP = 174 — the model correctly identifies 174 of 290 churners (recall 0.60) while keeping 270 of 384 active customers correct.
 
 ![Confusion Matrix - Customer Churn](outputs/churn_confusion_matrix.png)
 
@@ -667,15 +721,39 @@ Confusion matrix on the **class-balanced** held-out snapshot (122 customers). TN
 
 ### Churn Model — ROC Curve
 
-The ROC curve plots True Positive Rate against False Positive Rate across thresholds. AUC = 0.7046 on the balanced test (0.7445 on the full imbalanced test) indicates the model ranks churners above non-churners substantially better than chance (0.5).
+The ROC curve plots True Positive Rate against False Positive Rate across thresholds. AUC = 0.7153 indicates the model ranks churners above non-churners better than chance (0.5).
 
 ![ROC Curve - Customer Churn](outputs/churn_roc_curve.png)
 
 ---
 
+### Churn Model — Precision-Recall Curve
+
+Precision–recall trade-off on the held-out test set (PR-AUC = 0.6189, versus a 0.43 no-skill baseline).
+
+![Precision-Recall Curve - Customer Churn](outputs/churn_precision_recall_curve.png)
+
+---
+
+### Churn Model — 5-Fold Cross-Validation
+
+Per-fold ROC-AUC on the training split (mean 0.7376 ± 0.013) — the more reliable generalisation estimate.
+
+![CV Scores - Customer Churn](outputs/churn_cv_scores.png)
+
+---
+
+### Churn Model — Metrics Dashboard
+
+All headline metrics and the confusion matrix in one view.
+
+![Metrics Dashboard - Customer Churn](outputs/churn_metrics_dashboard.png)
+
+---
+
 ### Churn Model — Feature Importance
 
-`Recency` (0.203), `Tenure` (0.125) and `ActiveDays` (0.111) lead — classic RFM/recency signals dominate dormant-customer prediction, with `AverageGap` and `Frequency` close behind.
+`TotalQuantity` (0.076), `Monetary` (0.073) and `Recency` (0.070) lead, but importance is spread almost evenly across all 22 features — consistent with the weak overall signal.
 
 ![Feature Importance - Customer Churn](outputs/churn_feature_importance.png)
 
@@ -713,14 +791,6 @@ The next-order spending distribution is right-skewed, with most orders below BRL
 
 ---
 
-### Combined — Model Metrics Comparison
-
-Side-by-side comparison of both model metrics. The two panels measure different quantities (classification scores vs regression errors in BRL) and are **not directly comparable**.
-
-![Model Metrics Comparison](outputs/model_metrics_comparison.png)
-
----
-
 ## 17. Customer Risk Value
 
 ### Formula
@@ -739,14 +809,14 @@ Thresholds are the **33rd and 66th percentiles of the held-out predicted-spendin
 
 | Segment | Rule | Threshold |
 |---|---|---|
-| **Low** | `R ≤ t1` | `t1 = 116.62` |
-| **Medium** | `t1 < R ≤ t2` | `t2 = 165.09` |
+| **Low** | `R ≤ t1` | `t1 = 120.09` |
+| **Medium** | `t1 < R ≤ t2` | `t2 = 150.60` |
 | **High** | `R > t2` | — |
 
-On this population the churn base rate is ~96.7%; the churn model is trained on
-a class-balanced sample so its probabilities spread (roughly 0.28–0.81 on the
-sample inputs) rather than clustering near 0.96, and the risk value is driven by
-both churn probability and predicted spending.
+The churn base rate on this population is ~43%; the churn model is trained on
+the natural (near-balanced) class mix, so its probabilities spread across the
+full [0, 1] range rather than clustering at an extreme. The risk value is driven
+by both churn probability and predicted spending.
 
 ### Interpretation
 
@@ -763,9 +833,10 @@ Illustrative sensitivity examples are in `outputs/customer_risk_value_examples.c
 ### Limitations
 
 > **The Customer Risk Value is a prototype demonstration indicator, not a validated financial estimate.**
-> - The churn target is heavily imbalanced (~96% base rate), corrected by class balancing; the spending target is **conditional on a subsequent order existing**
+> - The churn target is near-balanced (~43% base rate) and the spending target is **conditional on a subsequent order existing**
+> - The two models are trained on **different datasets** (Online Retail II for churn, Olist for spending), so a "customer" only aligns if the analyst supplies matching identifiers — the combined value is a demonstration, not a per-customer truth
 > - No causal relationship between churn and revenue loss is established
-> - Churn probabilities are relative risk scores from a balanced-trained model, not calibrated real-world dormancy rates
+> - Churn probabilities are relative risk scores, not calibrated real-world dormancy rates
 > - The combined value should be treated as a relative prioritisation signal only
 
 ---
@@ -779,7 +850,7 @@ For each row in the uploaded CSVs, the system returns:
 | Output Field | Type | Description |
 |---|---|---|
 | `customer_id` | String | Customer identifier (if provided), otherwise `row_N` |
-| `churn_probability` | Float [0, 1] | Estimated probability of dormancy within the horizon |
+| `churn_probability` | Float [0, 1] | Estimated probability that the customer has churned |
 | `predicted_churn` | String | `"Churned"` or `"Not Churned"` (threshold: 0.5) |
 | `predicted_next_order_spending_BRL` | Float ≥ 0 | Predicted BRL value of the customer's next order |
 | `customer_risk_value_BRL` | Float ≥ 0 | churn_probability × predicted_next_order_spending_BRL |
@@ -802,10 +873,11 @@ The results page also shows:
 
 | File | Description |
 |---|---|
-| `outputs/churn_evaluation_metrics.csv` | Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC, base rate |
+| `outputs/churn_evaluation_metrics.csv` | Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC, CV ROC-AUC (+ std) |
 | `outputs/churn_classification_report.csv` | Per-class precision/recall/F1/support |
 | `outputs/churn_confusion_matrix.csv` | TN/FP/FN/TP counts |
-| `outputs/churn_feature_importance.csv` | Feature importance scores (all 12 features) |
+| `outputs/churn_feature_importance.csv` | Feature importance scores (all 22 features) |
+| `outputs/churn_predictions.csv` | Per-test-customer features, actual/predicted churn, probability |
 | `outputs/spending_evaluation_metrics.csv` | MAE, RMSE, R², Median AE |
 | `outputs/spending_feature_importance.csv` | Feature importance scores (all 9 features) |
 | `outputs/spending_predictions.csv` | Actual, predicted, residual per test observation |
@@ -832,7 +904,7 @@ pytest tests/test_pipeline.py -v
 |---|---|
 | Churn model load | Model file exists and is loadable |
 | Churn model type | Confirms `RandomForestClassifier` |
-| Churn feature count | Model expects exactly 12 features |
+| Churn feature count | Model expects exactly 22 features |
 | Churn probability range | All probabilities ∈ [0, 1] |
 | Churn output shape | Output shape matches input rows |
 | Spending model load | Model file exists and is loadable |
@@ -854,11 +926,12 @@ pytest tests/test_pipeline.py -v
 
 | Limitation | Description |
 |---|---|
-| **Rare-event churn** | ~96.7% of repeat customers do not buy within 150 days; corrected by oversampling to 50/50 for training and a class-balanced held-out evaluation. On the full imbalanced set, ROC-AUC (0.7445) is the informative metric, not accuracy |
+| **Moderate churn signal** | Accuracy 0.659 / ROC-AUC 0.715 on the held-out test (5-fold CV ROC-AUC 0.738 ± 0.013). The model beats the 0.570 majority-class baseline, but the 22 features carry only a modest signal — the best single-feature AUC is 0.72 |
 | **Conditional spending target** | The spending model predicts the next order's value **conditional on a subsequent order existing** — never-reordering customers are excluded from the regression set |
 | **Weak spending signal** | R² = 0.043 — prior-order history explains only ~4% of held-out variance; predictions are weak signals for individuals |
-| **Olist is not a subscription business** | "Churn" means long-run inactivity after a repeat purchase, not contract cancellation |
-| **Horizon / cut-off choices** | The 150-day horizon and 2018-01-01 / 2018-04-01 cut-offs are design choices, not validated optima |
+| **Models use different datasets** | The churn model is trained on Online Retail II (UK) and the spending model on Olist (Brazil); the combined risk value only aligns a "customer" when matching identifiers are supplied |
+| **Not a subscription business** | "Churn" means long-run inactivity, not contract cancellation |
+| **Horizon / cut-off choices** | The 90-day churn window and the 2018-01-01 / 2018-04-01 spending cut-offs are design choices, not validated optima |
 | **No significance testing** | Metric differences are not tested for statistical significance |
 | **Feature importance ≠ causation** | MDI importance reflects predictive contribution, not causal effect |
 | **Risk value not financially validated** | It is a prototype demonstration, not a validated financial or business outcome |
@@ -873,11 +946,11 @@ All scripts use `random_state=42` for full determinism.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Build the shared datasets from the raw Olist tables
+# 2. Build the Olist spending datasets from the raw Olist tables
 python prepare_data.py
 # → data/olist_orders_joined.csv
-# → data/olist_churn_dataset.csv
 # → data/olist_spending_dataset_prepared.csv
+# (the churn input data/customer_churn_dataset_enriched.csv is pre-built by notebooks/model1.ipynb)
 
 # 3. Reproduce the spending model, metrics, and figures
 python train_spending.py
@@ -889,7 +962,6 @@ python train_spending.py
 python train_churn.py
 # → models/churn_model.pkl, models/churn_features.json
 # → outputs/churn_*.csv, outputs/churn_*.png
-# → outputs/model_metrics_comparison.png
 
 # 5. Start the Flask application
 python app.py

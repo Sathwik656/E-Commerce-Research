@@ -8,8 +8,9 @@ Batch workflow:
      then computes the prototype Customer Risk Value
      (churn probability x predicted next-order spending).
 
-The risk value combines outputs from two models trained on the SAME unified Olist
-customer population (repeat customers). It is a prototype indicator, not a
+The risk value combines outputs from two independently trained models: the churn
+classifier (enriched RFM dataset derived from Online Retail II) and the spending
+regressor (Olist prior-order history). It is a prototype indicator, not a
 validated financial outcome. When both files contain a `customer_id` column the
 rows are joined on it; otherwise rows are paired by position.
 
