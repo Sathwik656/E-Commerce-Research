@@ -3,14 +3,10 @@
     "Recency",
     "Frequency",
     "Monetary",
-    "TotalItems",
-    "TotalProducts",
-    "TotalSellers",
-    "AverageFreight",
-    "AverageInstallments",
+    "TotalQuantity",
     "AverageOrderValue",
-    "Tenure",
-    "ActiveDays",
-    "AverageGap"
+    "AverageQuantityPerOrder",
+    "UniqueProducts",
+    "ActiveDays"
   ]
 }
