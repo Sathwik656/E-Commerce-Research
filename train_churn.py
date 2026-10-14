@@ -148,15 +148,71 @@ def plot_feature_importance(importance, path):
     plt.close(fig)
 
 
-def plot_roc_curve(y_test, proba, auc, path):
-    fpr, tpr, _ = roc_curve(y_test, proba)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(fpr, tpr, color="#c0653b", linewidth=2, label=f"ROC curve (AUC = {auc:.4f})")
-    ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Random classifier")
-    ax.set_xlabel("False positive rate")
-    ax.set_ylabel("True positive rate")
-    ax.set_title("ROC Curve - Customer Churn (Olist)")
-    ax.legend(loc="lower right")
+def plot_roc_curve(y, proba, auc, path):
+    fpr, tpr, _ = roc_curve(y, proba)
+    fig, ax = plt.subplots(figsize=(6.5, 5.2), dpi=300)
+    ax.plot([0, 1], [0, 1], linestyle="--", linewidth=1.8, color="#0b559f", label="No Skill")
+    ax.plot(
+        fpr, tpr,
+        marker="o",
+        markersize=3.5,
+        linewidth=1.8,
+        color="#f27405",
+        label=f"Random Forest (AUC = {auc:.4f})"
+    )
+    ax.set_xlabel("False Positive Rate", fontsize=11)
+    ax.set_ylabel("True Positive Rate", fontsize=11)
+    ax.set_title("ROC Curve - Customer Churn Prediction", fontsize=12, fontweight="medium")
+    ax.set_xlim([-0.03, 1.03])
+    ax.set_ylim([-0.03, 1.05])
+    ax.set_xticks(np.arange(0.0, 1.1, 0.2))
+    ax.set_yticks(np.arange(0.0, 1.1, 0.2))
+    ax.legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#cbd5e1", fontsize=10)
+    fig.tight_layout()
+    fig.savefig(path, dpi=300)
+    plt.close(fig)
+
+
+def plot_precision_vs_confidence(y_bal, proba_bal, y_full, proba_full, path, csv_path=None):
+    thresholds = np.linspace(0.10, 0.80, 71)
+
+    def compute_curve(y, proba):
+        t_list, p_list = [], []
+        for t in thresholds:
+            preds = (proba >= t).astype(int)
+            if preds.sum() >= 5:
+                t_list.append(t)
+                p_list.append(precision_score(y, preds, zero_division=0))
+        return np.array(t_list), np.array(p_list)
+
+    t_bal, p_bal = compute_curve(y_bal, proba_bal)
+    t_full, p_full = compute_curve(y_full, proba_full)
+
+    if csv_path:
+        common_t = np.intersect1d(np.round(t_bal, 4), np.round(t_full, 4))
+        b_map = dict(zip(np.round(t_bal, 4), np.round(p_bal, 4)))
+        f_map = dict(zip(np.round(t_full, 4), np.round(p_full, 4)))
+        pd.DataFrame({
+            "Confidence_Threshold": common_t,
+            "Precision_Balanced": [b_map[t] for t in common_t],
+            "Precision_Full": [f_map[t] for t in common_t],
+        }).to_csv(csv_path, index=False)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+    ax.plot(t_bal, p_bal, color="#c0653b", linewidth=2.2, label=f"Balanced Cohort (50% base rate, n={len(y_bal)})")
+    ax.plot(t_full, p_full, color="#3b6ea5", linewidth=2.2, label=f"Full Cohort (96.7% base rate, n={len(y_full)})")
+
+    ax.axvline(0.50, color="#64748b", linestyle=":", linewidth=1.2, label="Default Decision Threshold (0.50)")
+    ax.axhline(0.50, color="#cbd5e1", linestyle="--", linewidth=1.0)
+
+    ax.set_xlim([0.10, 0.80])
+    ax.set_ylim([0.45, 1.02])
+    ax.set_xlabel("Confidence Threshold (Predicted Churn Probability)", fontsize=11)
+    ax.set_ylabel("Precision", fontsize=11)
+    ax.set_title("Precision vs Confidence Curve\n(Out-of-Time Churn Validation Data)", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(loc="lower right", frameon=True, facecolor="white", edgecolor="#cbd5e1", fontsize=9.5)
+
     fig.tight_layout()
     fig.savefig(path, dpi=300)
     plt.close(fig)
@@ -282,10 +338,19 @@ def main():
 
     plot_confusion_matrix(cm, OUT_DIR / "churn_confusion_matrix.png")
     plot_feature_importance(importance, OUT_DIR / "churn_feature_importance.png")
-    plot_roc_curve(y_test, proba, metrics["ROC-AUC"], OUT_DIR / "churn_roc_curve.png")
+    plot_roc_curve(test["Churn"], full_proba, full_auc, OUT_DIR / "churn_roc_curve.png")
+    plot_precision_vs_confidence(
+        y_test,
+        proba,
+        test["Churn"],
+        full_proba,
+        OUT_DIR / "churn_precision_vs_confidence.png",
+        csv_path=OUT_DIR / "churn_precision_vs_confidence.csv",
+    )
     made = plot_metrics_comparison(metrics, OUT_DIR / "model_metrics_comparison.png")
 
     print("Comparison figure written:", made)
+    print("Precision vs confidence curve written:", OUT_DIR / "churn_precision_vs_confidence.png")
     print("Model saved to:", MODEL_DIR / "churn_model.pkl")
 
 
